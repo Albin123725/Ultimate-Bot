@@ -1,0 +1,62 @@
+{
+  "name": "ultimate-minecraft-bot-system",
+  "version": "10.0.0",
+  "description": "Ultimate Minecraft Bot System with Complete Feature Integration",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "setup": "node auto-setup.js",
+    "deploy": "npm run setup && npm start",
+    "clean": "rm -rf node_modules logs/*",
+    "update": "git pull && npm install && npm run setup",
+    "test": "node test-connection.js",
+    "backup": "node backup-data.js",
+    "monitor": "node system-monitor.js"
+  },
+  "keywords": [
+    "minecraft",
+    "bot",
+    "aternos",
+    "automation",
+    "ai",
+    "neural",
+    "proxy",
+    "security",
+    "dashboard",
+    "websocket",
+    "advanced",
+    "ultimate"
+  ],
+  "author": "Ultimate Bot System",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.14.2",
+    "mineflayer": "^4.12.0",
+    "mineflayer-pathfinder": "^2.4.4",
+    "vec3": "^0.1.8",
+    "fs-extra": "^11.1.1",
+    "dotenv": "^16.3.1",
+    "crypto-js": "^4.1.1",
+    "axios": "^1.6.0",
+    "node-cron": "^3.0.2",
+    "user-agents": "^1.1.5",
+    "check-disk-space": "^3.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ultimate-bot-system/minecraft-bot-v10.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ultimate-bot-system/minecraft-bot-v10/issues"
+  },
+  "homepage": "https://github.com/ultimate-bot-system/minecraft-bot-v10#readme"
+}
