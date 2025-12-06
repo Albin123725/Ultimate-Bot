@@ -6,18 +6,14 @@ const EventEmitter = require('events');
 
 // REAL Minecraft bot library
 const mineflayer = require('mineflayer');
-const { pathfinder, Movements, goals } = require('mineflayer-pathfinder');
-const minecraftData = require('minecraft-data');
 
 class BotSystem extends EventEmitter {
   constructor() {
     super();
     this.bots = new Map();
     this.accounts = new Map();
-    this.proxies = [];
     this.events = [];
     this.consoleLogs = [];
-    this.tasks = [];
     this.chatHistory = [];
     
     // REAL Configuration
@@ -30,19 +26,8 @@ class BotSystem extends EventEmitter {
       
       bots: {
         maxBots: parseInt(process.env.MAX_BOTS) || 4,
-        types: ['builder', 'miner', 'explorer', 'socializer', 'guardian'],
         autoReconnect: true,
-        maxReconnectAttempts: 5,
         reconnectDelay: 10000
-      },
-      
-      features: {
-        realConnection: true, // REAL CONNECTION
-        antiAFK: true,
-        autoChat: true,
-        autoMovement: true,
-        pathfinding: true,
-        itemCollection: true
       }
     };
     
@@ -55,14 +40,13 @@ class BotSystem extends EventEmitter {
     
     await this.createDirectories();
     await this.loadData();
-    this.startMonitoring();
     
-    this.consoleLog('System initialized - Ready for REAL connections');
+    this.consoleLog('✅ System initialized - Ready for REAL connections');
     return this;
   }
   
   async createDirectories() {
-    const dirs = ['logs', 'config', 'data', 'backups'];
+    const dirs = ['logs', 'config', 'data'];
     for (const dir of dirs) {
       await fs.ensureDir(path.join(__dirname, dir));
     }
@@ -78,7 +62,7 @@ class BotSystem extends EventEmitter {
       await this.generateAccounts(10);
     }
     
-    this.consoleLog(`Loaded ${this.accounts.size} accounts`);
+    this.consoleLog(`✅ Loaded ${this.accounts.size} accounts`);
   }
   
   async generateAccounts(count) {
@@ -106,39 +90,6 @@ class BotSystem extends EventEmitter {
     await fs.writeJson(accountsPath, Array.from(this.accounts.values()), { spaces: 2 });
   }
   
-  async createBot(type) {
-    const botId = `bot_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
-    const account = await this.getNextAccount();
-    
-    const bot = {
-      id: botId,
-      type: type,
-      name: account.username,
-      account: account,
-      status: 'created',
-      health: 20,
-      food: 20,
-      position: { x: 0, y: 64, z: 0 },
-      activity: 'initializing',
-      // REAL bot instance (will be set when connected)
-      instance: null,
-      settings: {
-        autoReconnect: true,
-        chatEnabled: true,
-        antiAFK: true
-      },
-      connection: {
-        connected: false,
-        reconnectAttempts: 0
-      }
-    };
-    
-    this.bots.set(botId, bot);
-    this.consoleLog(`Created ${type} bot: ${bot.name}`);
-    
-    return bot;
-  }
-  
   async getNextAccount() {
     const accounts = Array.from(this.accounts.values())
       .filter(acc => acc.status === 'active')
@@ -149,6 +100,35 @@ class BotSystem extends EventEmitter {
     await this.saveAccounts();
     
     return account;
+  }
+  
+  async createBot() {
+    const botId = `bot_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
+    const account = await this.getNextAccount();
+    
+    const bot = {
+      id: botId,
+      name: account.username,
+      account: account,
+      status: 'created',
+      health: 20,
+      food: 20,
+      position: { x: 0, y: 64, z: 0 },
+      activity: 'initializing',
+      instance: null,
+      settings: {
+        autoReconnect: true
+      },
+      connection: {
+        connected: false,
+        reconnectAttempts: 0
+      }
+    };
+    
+    this.bots.set(botId, bot);
+    this.consoleLog(`🤖 Created bot: ${bot.name}`);
+    
+    return bot;
   }
   
   async connectBot(botId) {
@@ -170,18 +150,13 @@ class BotSystem extends EventEmitter {
         port: this.config.server.port,
         username: bot.name,
         version: this.config.server.version,
-        auth: 'offline', // For offline mode (Aternos)
-        viewDistance: 'tiny',
-        chatLengthLimit: 256
+        auth: 'offline' // For Aternos (offline mode)
       };
       
       this.consoleLog(`Creating Mineflayer bot for ${bot.name}...`);
       
       // Create the bot instance
       const mcBot = mineflayer.createBot(options);
-      
-      // Load pathfinding plugin
-      mcBot.loadPlugin(pathfinder);
       
       // Store bot instance
       bot.instance = mcBot;
@@ -252,8 +227,8 @@ class BotSystem extends EventEmitter {
       this.addChatMessage(username, message, 'player');
       this.consoleLog(`💬 ${username}: ${message}`);
       
-      // Auto-reply if socializer bot
-      if (bot.type === 'socializer' && bot.settings.chatEnabled) {
+      // Auto-reply to messages mentioning the bot
+      if (message.toLowerCase().includes(bot.name.toLowerCase()) || Math.random() < 0.3) {
         setTimeout(() => {
           if (mcBot.player) {
             const replies = [
@@ -298,7 +273,7 @@ class BotSystem extends EventEmitter {
       bot.connection.connected = false;
       this.consoleLog(`🔌 ${bot.name} disconnected: ${reason || 'Unknown reason'}`);
       
-      if (bot.settings.autoReconnect && bot.connection.reconnectAttempts < this.config.bots.maxReconnectAttempts) {
+      if (bot.settings.autoReconnect && bot.connection.reconnectAttempts < 5) {
         this.scheduleReconnection(bot);
       }
     });
@@ -307,13 +282,7 @@ class BotSystem extends EventEmitter {
     mcBot.on('spawn', () => {
       bot.status = 'connected';
       bot.connection.connected = true;
-      this.consoleLog(`📍 ${bot.name} spawned at position`);
-    });
-    
-    // Death events
-    mcBot.on('death', () => {
-      this.consoleLog(`💀 ${bot.name} died!`, 'warning');
-      this.addChatMessage('System', `${bot.name} died and will respawn`, 'system');
+      this.consoleLog(`📍 ${bot.name} spawned in world`);
     });
   }
   
@@ -331,64 +300,52 @@ class BotSystem extends EventEmitter {
         return;
       }
       
-      // Perform activities based on bot type
-      this.performBotActivity(bot);
+      // Perform random activities
+      this.performRandomActivity(bot);
       
       // Update health/food from bot instance
       if (bot.instance.health !== undefined) bot.health = bot.instance.health;
       if (bot.instance.food !== undefined) bot.food = bot.instance.food;
       
-    }, 10000 + Math.random() * 20000); // Every 10-30 seconds
+    }, 15000 + Math.random() * 15000); // Every 15-30 seconds
     
     // Anti-AFK movement
-    if (bot.settings.antiAFK) {
-      bot.afkInterval = setInterval(() => {
-        if (bot.instance && bot.connection.connected) {
-          this.antiAFKMovement(bot);
-        }
-      }, 60000 + Math.random() * 120000); // Every 1-3 minutes
-    }
+    if (bot.afkInterval) clearInterval(bot.afkInterval);
+    bot.afkInterval = setInterval(() => {
+      if (bot.instance && bot.connection.connected) {
+        this.antiAFKMovement(bot);
+      }
+    }, 60000 + Math.random() * 60000); // Every 1-2 minutes
     
-    // Auto-chat for socializer bots
-    if (bot.type === 'socializer' && bot.settings.chatEnabled) {
-      bot.chatInterval = setInterval(() => {
-        if (bot.instance && bot.connection.connected && Math.random() < 0.3) {
-          this.sendBotChat(bot);
-        }
-      }, 30000 + Math.random() * 60000); // Every 30-90 seconds
-    }
+    // Auto-chat
+    if (bot.chatInterval) clearInterval(bot.chatInterval);
+    bot.chatInterval = setInterval(() => {
+      if (bot.instance && bot.connection.connected && Math.random() < 0.4) {
+        this.sendBotChat(bot);
+      }
+    }, 30000 + Math.random() * 60000); // Every 30-90 seconds
   }
   
-  performBotActivity(bot) {
+  performRandomActivity(bot) {
     if (!bot.instance || !bot.connection.connected) return;
     
-    const activities = {
-      builder: ['building', 'mining', 'crafting', 'placing_blocks'],
-      miner: ['mining', 'digging', 'exploring_caves', 'looking_for_ores'],
-      explorer: ['exploring', 'mapping', 'traveling', 'climbing'],
-      socializer: ['chatting', 'trading', 'helping', 'dancing'],
-      guardian: ['patrolling', 'guarding', 'watching', 'scouting']
-    };
+    const activities = [
+      'exploring', 'mining', 'building', 'chatting', 
+      'guarding', 'farming', 'fishing', 'crafting'
+    ];
     
-    const typeActivities = activities[bot.type] || ['idle'];
-    bot.activity = typeActivities[Math.floor(Math.random() * typeActivities.length)];
+    bot.activity = activities[Math.floor(Math.random() * activities.length)];
     
-    // Perform actual Minecraft actions based on activity
+    // Perform actual Minecraft actions
     switch (bot.activity) {
       case 'mining':
-      case 'digging':
         this.mineRandomBlock(bot);
         break;
       case 'exploring':
-      case 'traveling':
         this.randomMovement(bot);
         break;
       case 'chatting':
-        if (Math.random() < 0.5) this.sendBotChat(bot);
-        break;
-      case 'placing_blocks':
-        // Try to place a block if has one
-        this.placeRandomBlock(bot);
+        this.sendBotChat(bot);
         break;
     }
   }
@@ -396,39 +353,39 @@ class BotSystem extends EventEmitter {
   mineRandomBlock(bot) {
     if (!bot.instance) return;
     
-    const mcData = minecraftData(bot.instance.version);
-    const blocks = mcData.blocksArray.filter(block => 
-      block.hardness !== undefined && block.hardness < 10
-    );
+    // Look for nearby blocks to mine
+    const block = bot.instance.findBlock({
+      matching: (block) => {
+        return block && block.name && 
+               ['stone', 'dirt', 'grass', 'gravel', 'sand', 'coal_ore'].includes(block.name);
+      },
+      maxDistance: 16,
+      count: 1
+    });
     
-    if (blocks.length > 0) {
-      const block = blocks[Math.floor(Math.random() * blocks.length)];
-      
-      // Look for nearby blocks of this type
-      const blockToMine = bot.instance.findBlock({
-        matching: block.id,
-        maxDistance: 16,
-        count: 1
+    if (block) {
+      bot.instance.dig(block, (err) => {
+        if (!err) {
+          this.consoleLog(`⛏️ ${bot.name} mined ${block.name}`);
+        }
       });
-      
-      if (blockToMine) {
-        bot.instance.dig(blockToMine, (err) => {
-          if (!err) {
-            this.consoleLog(`⛏️ ${bot.name} mined ${block.name}`);
-          }
-        });
-      }
     }
   }
   
   randomMovement(bot) {
     if (!bot.instance) return;
     
-    const randomX = bot.position.x + (Math.random() - 0.5) * 20;
-    const randomZ = bot.position.z + (Math.random() - 0.5) * 20;
+    // Move in random direction
+    const directions = ['forward', 'back', 'left', 'right'];
+    const direction = directions[Math.floor(Math.random() * directions.length)];
     
-    const goal = new goals.GoalNear(randomX, bot.position.y, randomZ, 1);
-    bot.instance.pathfinder.setGoal(goal);
+    bot.instance.setControlState(direction, true);
+    
+    setTimeout(() => {
+      if (bot.instance) {
+        bot.instance.setControlState(direction, false);
+      }
+    }, 1000 + Math.random() * 2000);
   }
   
   antiAFKMovement(bot) {
@@ -459,70 +416,23 @@ class BotSystem extends EventEmitter {
   sendBotChat(bot) {
     if (!bot.instance) return;
     
-    const chatMessages = {
-      builder: [
-        'Building something great!',
-        'Need more materials...',
-        'This looks good!',
-        'Check out my build!'
-      ],
-      miner: [
-        'Found some ores!',
-        'Digging deep...',
-        'Dark down here!',
-        'Need torches!'
-      ],
-      explorer: [
-        'Beautiful view!',
-        'Exploring new areas!',
-        'Found something interesting!',
-        'This way looks good!'
-      ],
-      socializer: [
-        'Hello everyone!',
-        'How is everyone doing?',
-        'Nice server!',
-        'Anyone need help?',
-        'Good day!'
-      ],
-      guardian: [
-        'All clear!',
-        'Keeping watch.',
-        'Nothing suspicious.',
-        'Area secure.'
-      ]
-    };
+    const chatMessages = [
+      'Hello everyone!',
+      'How is everyone doing?',
+      'Nice server!',
+      'Anyone need help?',
+      'Good day!',
+      'Building something great!',
+      'Found some ores!',
+      'Beautiful view!',
+      'Exploring new areas!',
+      'All clear here!'
+    ];
     
-    const messages = chatMessages[bot.type] || ['Hello!'];
-    const message = messages[Math.floor(Math.random() * messages.length)];
+    const message = chatMessages[Math.floor(Math.random() * chatMessages.length)];
     
     bot.instance.chat(message);
     this.addChatMessage(bot.name, message, 'bot');
-  }
-  
-  placeRandomBlock(bot) {
-    if (!bot.instance) return;
-    
-    // Check if bot has blocks in inventory
-    const blockItems = bot.instance.inventory.items().filter(item => 
-      item && item.name.includes('_block') || 
-      item && ['planks', 'stone', 'bricks', 'glass'].some(mat => item.name.includes(mat))
-    );
-    
-    if (blockItems.length > 0) {
-      const block = blockItems[0];
-      const referenceBlock = bot.instance.blockAt(
-        bot.instance.entity.position.offset(1, 0, 0)
-      );
-      
-      if (referenceBlock && referenceBlock.name === 'air') {
-        bot.instance.placeBlock(referenceBlock, { x: 1, y: 0, z: 0 }, (err) => {
-          if (!err) {
-            this.consoleLog(`🧱 ${bot.name} placed a ${block.name}`);
-          }
-        });
-      }
-    }
   }
   
   scheduleReconnection(bot) {
@@ -542,13 +452,12 @@ class BotSystem extends EventEmitter {
     const maxBots = Math.min(this.config.bots.maxBots, 4);
     const results = { successful: [], failed: [] };
     
-    // Clear existing bots first
+    // Clear existing disconnected bots first
     await this.clearInactiveBots();
     
     for (let i = 0; i < maxBots; i++) {
       try {
-        const type = this.config.bots.types[i % this.config.bots.types.length];
-        const bot = await this.createBot(type);
+        const bot = await this.createBot();
         
         const delay = i * 5000; // Stagger connections by 5 seconds
         
@@ -557,8 +466,7 @@ class BotSystem extends EventEmitter {
             await this.connectBot(bot.id);
             results.successful.push({
               botId: bot.id,
-              name: bot.name,
-              type: bot.type
+              name: bot.name
             });
           } catch (error) {
             results.failed.push({
@@ -578,6 +486,69 @@ class BotSystem extends EventEmitter {
       success: true,
       message: `Started ${results.successful.length} bots`,
       results: results
+    };
+  }
+  
+  async stopAllBots() {
+    this.consoleLog('🛑 Stopping all bots...');
+    
+    let stopped = 0;
+    
+    for (const [botId, bot] of this.bots) {
+      if (bot.instance) {
+        try {
+          bot.instance.end();
+          bot.instance = null;
+        } catch (error) {
+          // Ignore cleanup errors
+        }
+      }
+      
+      // Clear intervals
+      if (bot.activityInterval) clearInterval(bot.activityInterval);
+      if (bot.afkInterval) clearInterval(bot.afkInterval);
+      if (bot.chatInterval) clearInterval(bot.chatInterval);
+      
+      bot.status = 'stopped';
+      bot.connection.connected = false;
+      stopped++;
+    }
+    
+    return {
+      success: true,
+      message: `Stopped ${stopped} bots`
+    };
+  }
+  
+  async emergencyStop() {
+    this.consoleLog('🚨 EMERGENCY STOP - Disconnecting all bots');
+    
+    let stopped = 0;
+    
+    for (const [botId, bot] of this.bots) {
+      // Clear intervals
+      if (bot.activityInterval) clearInterval(bot.activityInterval);
+      if (bot.afkInterval) clearInterval(bot.afkInterval);
+      if (bot.chatInterval) clearInterval(bot.chatInterval);
+      
+      // Disconnect bot immediately
+      if (bot.instance) {
+        try {
+          bot.instance.quit();
+          bot.instance = null;
+        } catch (error) {
+          console.error(`Error stopping bot ${bot.name}:`, error.message);
+        }
+      }
+      
+      bot.status = 'emergency_stopped';
+      bot.connection.connected = false;
+      stopped++;
+    }
+    
+    return {
+      success: true,
+      message: `Emergency stop complete. Stopped ${stopped} bots.`
     };
   }
   
@@ -655,38 +626,153 @@ class BotSystem extends EventEmitter {
     return { success: true, message: `Cleared ${removed} inactive bots` };
   }
   
-  async emergencyStop() {
-    this.consoleLog('🛑 EMERGENCY STOP - Disconnecting all bots');
+  async rotateAccounts() {
+    this.consoleLog('👤 Rotating accounts...');
     
-    let stopped = 0;
+    let rotated = 0;
     
     for (const [botId, bot] of this.bots) {
-      // Clear intervals
-      if (bot.activityInterval) clearInterval(bot.activityInterval);
-      if (bot.afkInterval) clearInterval(bot.afkInterval);
-      if (bot.chatInterval) clearInterval(bot.chatInterval);
-      
-      // Disconnect bot
-      if (bot.instance) {
-        try {
-          bot.instance.end();
-          bot.instance = null;
-        } catch (error) {
-          console.error(`Error stopping bot ${bot.name}:`, error.message);
-        }
+      if (bot.status === 'connected') {
+        const newAccount = await this.getNextAccount();
+        const oldAccount = bot.account.username;
+        bot.account = newAccount;
+        bot.name = newAccount.username;
+        rotated++;
+        
+        this.logEvent('account_rotated', {
+          botId: bot.id,
+          oldAccount: oldAccount,
+          newAccount: newAccount.username
+        });
       }
-      
-      bot.status = 'stopped';
-      bot.connection.connected = false;
-      stopped++;
     }
+    
+    await this.saveAccounts();
     
     return {
       success: true,
-      message: `Emergency stop complete. Stopped ${stopped} bots.`
+      message: `Accounts rotated for ${rotated} bots`,
+      rotated: rotated
     };
   }
   
   // Helper methods
   addChatMessage(sender, message, type = 'player') {
-    const chatM
+    const chatMessage = {
+      id: crypto.randomBytes(8).toString('hex'),
+      sender,
+      message,
+      type,
+      timestamp: Date.now()
+    };
+    
+    this.chatHistory.push(chatMessage);
+    if (this.chatHistory.length > 100) {
+      this.chatHistory = this.chatHistory.slice(-50);
+    }
+    
+    return chatMessage;
+  }
+  
+  consoleLog(message, level = 'info') {
+    const log = {
+      timestamp: Date.now(),
+      message,
+      level
+    };
+    
+    this.consoleLogs.push(log);
+    if (this.consoleLogs.length > 200) {
+      this.consoleLogs = this.consoleLogs.slice(-100);
+    }
+    
+    const prefix = level === 'error' ? '❌' : level === 'warning' ? '⚠️' : 'ℹ️';
+    console.log(`${prefix} [${new Date().toLocaleTimeString()}] ${message}`);
+    
+    return log;
+  }
+  
+  logEvent(type, data) {
+    const event = {
+      type,
+      data,
+      timestamp: Date.now()
+    };
+    
+    this.events.push(event);
+    if (this.events.length > 100) {
+      this.events = this.events.slice(-50);
+    }
+    
+    return event;
+  }
+  
+  getConnectedBots() {
+    return Array.from(this.bots.values()).filter(bot => bot.status === 'connected');
+  }
+  
+  getChatHistory(limit = 10) {
+    return this.chatHistory.slice(-limit).reverse();
+  }
+  
+  getRecentEvents(limit = 10) {
+    return this.events.slice(-limit).reverse().map(event => ({
+      type: event.type,
+      message: this.formatEventMessage(event),
+      time: new Date(event.timestamp).toLocaleTimeString()
+    }));
+  }
+  
+  getConsoleLogs(limit = 10) {
+    return this.consoleLogs.slice(-limit).reverse().map(log => 
+      `[${new Date(log.timestamp).toLocaleTimeString()}] ${log.message}`
+    );
+  }
+  
+  formatEventMessage(event) {
+    switch (event.type) {
+      case 'bot_connected':
+        return `✅ ${event.data.name} connected to server`;
+      case 'account_rotated':
+        return `👤 ${event.data.oldAccount} → ${event.data.newAccount}`;
+      default:
+        return `${event.type}`;
+    }
+  }
+  
+  // Public API methods
+  async getStatus() {
+    const connectedBots = this.getConnectedBots();
+    const serverStatus = await this.testServerConnection();
+    
+    // Calculate average health
+    const avgHealth = connectedBots.length > 0 
+      ? Math.round(connectedBots.reduce((sum, bot) => sum + (bot.health || 20), 0) / connectedBots.length)
+      : 20;
+    
+    return {
+      stats: {
+        totalBots: this.bots.size,
+        connectedBots: connectedBots.length,
+        serverOnline: serverStatus.online,
+        ping: serverStatus.ping,
+        chatMessages: this.chatHistory.length,
+        avgHealth: avgHealth,
+        uptime: Math.floor(process.uptime())
+      },
+      bots: connectedBots.map(bot => ({
+        id: bot.id,
+        name: bot.name,
+        type: 'bot',
+        status: bot.status,
+        health: bot.health,
+        food: bot.food,
+        activity: bot.activity,
+        position: `${bot.position.x},${bot.position.y},${bot.position.z}`,
+        account: bot.account.username
+      }))
+    };
+  }
+}
+
+module.exports = BotSystem;
