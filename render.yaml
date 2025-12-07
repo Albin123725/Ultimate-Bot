@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: minecraft-bot-system
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 18.17.0
+      - key: MINECRAFT_HOST
+        value: gameplannet.aternos.me
+      - key: MINECRAFT_PORT
+        value: 34286
+      - key: MINECRAFT_VERSION
+        value: 1.21.10
+    healthCheckPath: /
