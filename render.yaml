@@ -1,12 +1,14 @@
 services:
   - type: web
-    name: minecraft-bot-system
+    name: ultimate-minecraft-bot-system
     env: node
     buildCommand: npm install
     startCommand: npm start
     envVars:
       - key: NODE_VERSION
         value: 18.17.0
+      - key: PORT
+        value: 10000
       - key: MINECRAFT_HOST
         value: gameplannet.aternos.me
       - key: MINECRAFT_PORT
