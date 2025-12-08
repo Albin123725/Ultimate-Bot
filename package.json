@@ -1,14 +1,12 @@
 {
   "name": "ultimate-minecraft-bot-system-v6",
   "version": "6.0.0",
-  "description": "Ultimate Minecraft Bot System with ALL Features - No Native Dependencies",
+  "description": "Ultimate Minecraft Bot System - No Native Dependencies",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js",
     "setup": "node auto-setup.js",
-    "test": "node test-bot.js",
-    "deploy": "npm run setup && npm install && npm start"
+    "test": "node test-bot.js"
   },
   "dependencies": {
     "express": "^4.18.2",
@@ -19,9 +17,7 @@
     "minecraft-protocol": "^1.43.2",
     "uuid": "^9.0.0",
     "moment": "^2.29.4",
-    "chance": "^1.1.11",
-    "axios": "^1.6.0",
-    "crypto-js": "^4.2.0"
+    "axios": "^1.6.0"
   },
   "engines": {
     "node": "18.x"
