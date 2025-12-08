@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: ultimate-minecraft-bot-system
+    name: ultimate-minecraft-bots
     env: node
     buildCommand: npm install
     startCommand: npm start
@@ -12,7 +12,7 @@ services:
       - key: MINECRAFT_HOST
         value: gameplannet.aternos.me
       - key: MINECRAFT_PORT
-        value: 34286
+        value: 43658
       - key: MINECRAFT_VERSION
         value: 1.21.10
     healthCheckPath: /
