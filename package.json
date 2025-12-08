@@ -1,23 +1,14 @@
 {
-  "name": "ultimate-minecraft-bot-system-v6",
-  "version": "6.0.0",
-  "description": "Ultimate Minecraft Bot System - No Native Dependencies",
+  "name": "minecraft-bot-autostart",
+  "version": "1.0.0",
+  "description": "Minecraft Bot System with Auto-Start (No Dashboard)",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "setup": "node auto-setup.js",
-    "test": "node test-bot.js"
+    "start": "node server.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "ws": "^8.14.2",
-    "fs-extra": "^11.1.1",
-    "dotenv": "^16.3.1",
     "mineflayer": "^4.15.0",
-    "minecraft-protocol": "^1.43.2",
-    "uuid": "^9.0.0",
-    "moment": "^2.29.4",
-    "axios": "^1.6.0"
+    "dotenv": "^16.3.1"
   },
   "engines": {
     "node": "18.x"
