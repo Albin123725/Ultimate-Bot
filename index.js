@@ -2,12 +2,12 @@ const mineflayer = require('mineflayer');
 
 console.log(`
 ╔══════════════════════════════════════════════════════════╗
-║   🚀 MINECRAFT BOT SYSTEM - AUTO START MODE            ║
-║   ⚡ No Dashboard • Direct Connection                  ║
+║   🚀 MINECRAFT BOT SYSTEM - ANTI-THROTTLING MODE       ║
+║   ⚡ Smart Connection • No Errors • Auto-Retry         ║
 ╚══════════════════════════════════════════════════════════╝
 `);
 
-// Configuration for gameplannet.aternos.me:43658
+// Configuration
 const CONFIG = {
   SERVER: {
     host: 'gameplannet.aternos.me',
@@ -18,91 +18,153 @@ const CONFIG = {
     { 
       name: 'Agent007', 
       type: 'agent',
-      activities: ['exploring', 'surveillance', 'patrolling', 'observing']
+      skinUrl: 'https://mc-heads.net/avatar/MHF_Steve'
     },
     { 
       name: 'CroptonMiner', 
       type: 'cropton',
-      activities: ['mining', 'digging', 'exploring', 'resource gathering']
+      skinUrl: 'https://mc-heads.net/avatar/MHF_Alex'
     }
-  ]
+  ],
+  // Anti-throttling settings
+  CONNECTION: {
+    initialDelay: 60000, // Wait 60 seconds before first connection
+    betweenBots: 45000,  // 45 seconds between bots
+    reconnectDelay: 90000, // 90 seconds before reconnection attempts
+    maxRetries: 3,
+    randomizeDelay: true
+  }
 };
 
-// Store active bots
+// Global state
 const activeBots = new Map();
+const connectionQueue = [];
+let isConnecting = false;
+let connectionAttempts = {};
 
-// Log function
+// Logging system
 function log(message, type = 'info') {
-  const timestamp = new Date().toISOString();
-  const prefix = type === 'error' ? '❌' : 
-                type === 'success' ? '✅' : 
-                type === 'warning' ? '⚠️' : 'ℹ️';
+  const timestamp = new Date().toLocaleTimeString();
+  const prefix = {
+    error: '❌',
+    success: '✅', 
+    warning: '⚠️',
+    info: 'ℹ️',
+    debug: '🐛'
+  }[type] || 'ℹ️';
   
   console.log(`[${timestamp}] ${prefix} ${message}`);
 }
 
-// Create and connect a bot
-function createBot(botConfig, delay = 0) {
-  return new Promise((resolve) => {
-    setTimeout(async () => {
-      const { name, type } = botConfig;
-      
-      log(`Creating bot: ${name} (${type})`);
-      
-      try {
-        const bot = mineflayer.createBot({
-          host: CONFIG.SERVER.host,
-          port: CONFIG.SERVER.port,
-          username: name,
-          version: CONFIG.SERVER.version,
-          auth: 'offline'
-        });
-        
-        const botData = {
-          id: `${name}_${Date.now()}`,
-          name: name,
-          type: type,
-          instance: bot,
-          status: 'connecting',
-          health: 20,
-          food: 20,
-          position: null,
-          activity: 'Connecting...',
-          intervals: [],
-          stats: {
-            messages: 0,
-            mined: 0,
-            killed: 0,
-            connectedAt: Date.now()
-          }
-        };
-        
-        activeBots.set(botData.id, botData);
-        
-        // Setup event handlers
-        setupBotEvents(botData);
-        
-        resolve(botData);
-        
-      } catch (error) {
-        log(`Failed to create bot ${name}: ${error.message}`, 'error');
-        resolve(null);
+// Parse wait time from kick message
+function parseWaitTime(kickMessage) {
+  const match = kickMessage.match(/wait (\d+) seconds/);
+  return match ? parseInt(match[1]) * 1000 : 60000; // Default 60 seconds
+}
+
+// Schedule bot connection with anti-throttling
+async function scheduleBotConnection(botConfig, delay = 0) {
+  const botName = botConfig.name;
+  
+  if (!connectionAttempts[botName]) {
+    connectionAttempts[botName] = 0;
+  }
+  
+  connectionAttempts[botName]++;
+  
+  if (connectionAttempts[botName] > CONFIG.CONNECTION.maxRetries) {
+    log(`Max retries (${CONFIG.CONNECTION.maxRetries}) reached for ${botName}. Waiting 5 minutes...`, 'warning');
+    setTimeout(() => {
+      connectionAttempts[botName] = 0;
+      scheduleBotConnection(botConfig, 300000); // 5 minutes
+    }, 300000);
+    return;
+  }
+  
+  setTimeout(async () => {
+    await connectBot(botConfig);
+  }, delay);
+}
+
+// Connect bot with error handling
+async function connectBot(botConfig) {
+  const { name, type, skinUrl } = botConfig;
+  
+  log(`Attempting to connect ${name} (${type})...`);
+  
+  if (activeBots.has(name) && activeBots.get(name).status === 'connected') {
+    log(`${name} is already connected`, 'warning');
+    return;
+  }
+  
+  try {
+    const bot = mineflayer.createBot({
+      host: CONFIG.SERVER.host,
+      port: CONFIG.SERVER.port,
+      username: name,
+      version: CONFIG.SERVER.version,
+      auth: 'offline',
+      viewDistance: 'tiny',
+      colorsEnabled: false,
+      defaultChatPatterns: false,
+      hideErrors: true
+    });
+    
+    // Store bot data
+    const botData = {
+      name,
+      type,
+      instance: bot,
+      status: 'connecting',
+      health: 20,
+      food: 20,
+      position: null,
+      activity: 'Connecting...',
+      intervals: [],
+      stats: {
+        messages: 0,
+        mined: 0,
+        kills: 0,
+        connectedAt: Date.now(),
+        connectionAttempts: connectionAttempts[name] || 0
+      },
+      metadata: {
+        skinUrl,
+        lastChat: 0
       }
-    }, delay);
-  });
+    };
+    
+    activeBots.set(name, botData);
+    
+    // Setup event handlers
+    setupBotEvents(botData);
+    
+  } catch (error) {
+    log(`Failed to create bot ${name}: ${error.message}`, 'error');
+    scheduleBotConnection(botConfig, CONFIG.CONNECTION.reconnectDelay);
+  }
 }
 
 // Setup bot event handlers
 function setupBotEvents(botData) {
   const { instance: bot, name } = botData;
   
+  bot.on('login', () => {
+    log(`${name} logging in...`);
+  });
+  
   bot.on('spawn', () => {
     botData.status = 'connected';
-    botData.activity = 'Active';
-    log(`✅ ${name} successfully connected to server!`, 'success');
+    botData.activity = 'Spawned';
+    botData.stats.connectedAt = Date.now();
+    connectionAttempts[name] = 0; // Reset attempts on success
     
-    // Start bot activities
-    startBotActivities(botData);
+    log(`✅ ${name} successfully connected and spawned!`, 'success');
+    
+    // Wait 5 seconds before starting activities
+    setTimeout(() => {
+      startBotActivities(botData);
+    }, 5000);
   });
   
   bot.on('health', () => {
@@ -123,50 +185,53 @@ function setupBotEvents(botData) {
   bot.on('chat', (username, message) => {
     if (username === name) return;
     
-    log(`💬 ${username}: ${message}`);
+    const now = Date.now();
+    if (now - botData.metadata.lastChat < 5000) return; // Rate limit
     
-    // Auto-response (25% chance)
-    if (Math.random() < 0.25) {
+    log(`💬 ${username}: ${message.substring(0, 50)}${message.length > 50 ? '...' : ''}`);
+    
+    // Auto-response (15% chance, only if not spamming)
+    if (Math.random() < 0.15 && now - botData.metadata.lastChat > 10000) {
       setTimeout(() => {
-        if (bot.player) {
-          const response = getBotResponse(botData.type, message, username);
+        if (bot.player && botData.status === 'connected') {
+          const response = getBotResponse(botData.type, message, username, name);
           if (response) {
             bot.chat(response);
             botData.stats.messages++;
+            botData.metadata.lastChat = now;
             log(`🤖 ${name}: ${response}`);
           }
         }
-      }, 1000 + Math.random() * 3000);
-    }
-  });
-  
-  bot.on('blockBreakProgressObserved', (block, destroyStage) => {
-    if (destroyStage === 9) {
-      botData.stats.mined++;
-      log(`⛏️ ${name} mined ${block.name}`);
+      }, 2000 + Math.random() * 3000);
     }
   });
   
   bot.on('death', () => {
-    log(`💀 ${name} died!`, 'warning');
+    log(`💀 ${name} died`, 'warning');
     botData.health = 20;
   });
   
   bot.on('error', (err) => {
-    log(`❌ ${name} error: ${err.message}`, 'error');
+    log(`Error (${name}): ${err.message}`, 'error');
     botData.status = 'error';
   });
   
   bot.on('kicked', (reason) => {
-    log(`🚫 ${name} kicked: ${JSON.stringify(reason)}`, 'error');
+    log(`🚫 ${name} kicked: ${JSON.stringify(reason)}`, 'warning');
     botData.status = 'kicked';
     cleanupBot(botData);
     
-    // Try to reconnect after 60 seconds
-    setTimeout(() => {
-      log(`🔄 Attempting to reconnect ${name}...`);
-      createBot({ name: name, type: botData.type }, 0);
-    }, 60000);
+    // Parse wait time from kick message
+    const waitTime = parseWaitTime(reason);
+    const extraDelay = CONFIG.CONNECTION.randomizeDelay ? 
+      Math.random() * 30000 : 0;
+    
+    log(`⏳ ${name} will retry in ${Math.round((waitTime + extraDelay) / 1000)} seconds`);
+    
+    scheduleBotConnection(
+      { name, type: botData.type, skinUrl: botData.metadata.skinUrl },
+      waitTime + extraDelay
+    );
   });
   
   bot.on('end', () => {
@@ -174,16 +239,16 @@ function setupBotEvents(botData) {
     botData.status = 'disconnected';
     cleanupBot(botData);
     
-    // Try to reconnect after 45 seconds
-    setTimeout(() => {
-      log(`🔄 Attempting to reconnect ${name}...`);
-      createBot({ name: name, type: botData.type }, 0);
-    }, 45000);
+    // Schedule reconnection
+    scheduleBotConnection(
+      { name, type: botData.type, skinUrl: botData.metadata.skinUrl },
+      CONFIG.CONNECTION.reconnectDelay + Math.random() * 30000
+    );
   });
 }
 
-// Get bot response based on type
-function getBotResponse(botType, message, sender) {
+// Fixed getBotResponse function
+function getBotResponse(botType, message, sender, botName) {
   const responses = {
     agent: [
       'Mission underway.',
@@ -193,7 +258,9 @@ function getBotResponse(botType, message, sender) {
       'Affirmative.',
       'All clear.',
       'Reporting in.',
-      'Surveillance active.'
+      'Surveillance active.',
+      'Roger that.',
+      'Target acquired.'
     ],
     cropton: [
       'Found some diamonds!',
@@ -203,17 +270,28 @@ function getBotResponse(botType, message, sender) {
       'Need more torches.',
       'Rich ore vein here!',
       'Tunnel expanding.',
-      'Mining successful!'
+      'Found some iron!',
+      'Digging deep!',
+      'Mining expedition!'
     ]
   };
   
   const botResponses = responses[botType] || ['Hello!'];
   
-  // If mentioned by name
-  if (message.toLowerCase().includes(botType) || 
-      message.toLowerCase().includes('bot') ||
-      message.toLowerCase().includes(name)) {
-    return `Yes ${sender}?`;
+  // Check if bot is mentioned (using botName parameter, not undefined 'name')
+  const lowerMessage = message.toLowerCase();
+  if (lowerMessage.includes(botName.toLowerCase()) || 
+      lowerMessage.includes(botType) ||
+      lowerMessage.includes('bot')) {
+    const directResponses = [
+      `Yes ${sender}?`,
+      `What do you need ${sender}?`,
+      `I'm here ${sender}.`,
+      `Listening ${sender}.`,
+      `Yes?`,
+      `What's up ${sender}?`
+    ];
+    return directResponses[Math.floor(Math.random() * directResponses.length)];
   }
   
   // Question response
@@ -221,31 +299,36 @@ function getBotResponse(botType, message, sender) {
     const answers = [
       'Good question.',
       'I think so.',
-      'Not sure.',
+      'Not sure about that.',
       'Probably.',
       'Maybe.',
-      'Let me check.'
+      'Let me check.',
+      'Interesting question.',
+      'I wonder that too.'
     ];
     return answers[Math.floor(Math.random() * answers.length)];
   }
   
-  // Random response
-  return botResponses[Math.floor(Math.random() * botResponses.length)];
+  // Random response (50% chance)
+  if (Math.random() < 0.5) {
+    return botResponses[Math.floor(Math.random() * botResponses.length)];
+  }
+  
+  return null;
 }
 
 // Start bot activities
 function startBotActivities(botData) {
-  if (!botData.instance) return;
+  if (!botData.instance || botData.status !== 'connected') return;
   
   // Clear existing intervals
-  if (botData.intervals.length > 0) {
-    botData.intervals.forEach(interval => clearInterval(interval));
-    botData.intervals = [];
-  }
+  cleanupBotIntervals(botData);
+  
+  const bot = botData.instance;
   
   // Main activity loop
   const activityInterval = setInterval(() => {
-    if (!botData.instance || botData.status !== 'connected') {
+    if (!bot || botData.status !== 'connected') {
       clearInterval(activityInterval);
       return;
     }
@@ -253,27 +336,31 @@ function startBotActivities(botData) {
     const activity = getRandomActivity(botData.type);
     botData.activity = activity;
     
-    executeActivity(botData, activity);
+    try {
+      executeActivity(botData, activity);
+    } catch (error) {
+      // Silent fail for activity errors
+    }
     
-  }, 10000 + Math.random() * 15000);
+  }, 15000 + Math.random() * 15000); // 15-30 seconds
   
   botData.intervals.push(activityInterval);
   
   // Anti-AFK system
   const afkInterval = setInterval(() => {
-    if (botData.instance && botData.status === 'connected') {
+    if (bot && botData.status === 'connected') {
       antiAFKMovement(botData);
     }
-  }, 30000 + Math.random() * 60000);
+  }, 60000 + Math.random() * 60000); // 60-120 seconds
   
   botData.intervals.push(afkInterval);
   
-  // Random chat
+  // Random chat messages
   const chatInterval = setInterval(() => {
-    if (botData.instance && botData.status === 'connected' && Math.random() < 0.2) {
+    if (bot && botData.status === 'connected' && Math.random() < 0.2) {
       sendRandomChat(botData);
     }
-  }, 60000 + Math.random() * 120000);
+  }, 120000 + Math.random() * 120000); // 2-4 minutes
   
   botData.intervals.push(chatInterval);
 }
@@ -281,54 +368,46 @@ function startBotActivities(botData) {
 // Get random activity
 function getRandomActivity(botType) {
   const activities = {
-    agent: ['exploring', 'surveillance', 'patrolling', 'scouting', 'observing'],
-    cropton: ['mining', 'digging', 'tunneling', 'resource gathering', 'ore hunting']
+    agent: ['exploring', 'surveillance', 'patrolling', 'observing', 'scouting', 'guarding'],
+    cropton: ['mining', 'digging', 'resource gathering', 'tunnel digging', 'ore hunting', 'cave exploring']
   };
   
-  return activities[botType][Math.floor(Math.random() * activities[botType].length)];
+  const botActivities = activities[botType] || ['exploring'];
+  return botActivities[Math.floor(Math.random() * botActivities.length)];
 }
 
 // Execute activity
 function executeActivity(botData, activity) {
   const bot = botData.instance;
+  if (!bot) return;
   
   try {
     switch (activity) {
       case 'mining':
       case 'digging':
-      case 'tunneling':
-        // Look down and sometimes dig
+      case 'tunnel digging':
         bot.look(Math.random() * Math.PI * 2, Math.random() * Math.PI - Math.PI / 2);
-        
-        if (Math.random() < 0.3) {
-          const block = bot.blockAt(bot.entity.position.offset(0, -1, 0));
-          if (block && !block.name.includes('air')) {
-            bot.dig(block);
-          }
-        }
         break;
         
       case 'exploring':
       case 'patrolling':
       case 'scouting':
-        // Move in random direction
-        const dirs = ['forward', 'back', 'left', 'right'];
-        const dir = dirs[Math.floor(Math.random() * dirs.length)];
-        bot.setControlState(dir, true);
+        const directions = ['forward', 'back', 'left', 'right'];
+        const direction = directions[Math.floor(Math.random() * directions.length)];
+        bot.setControlState(direction, true);
         
         setTimeout(() => {
-          if (bot) bot.setControlState(dir, false);
-        }, 800 + Math.random() * 1200);
+          if (bot) bot.setControlState(direction, false);
+        }, 1000 + Math.random() * 2000);
         
         bot.look(Math.random() * Math.PI * 2, Math.random() * Math.PI - Math.PI / 2);
         break;
         
       default:
-        // Just look around
         bot.look(Math.random() * Math.PI * 2, Math.random() * Math.PI - Math.PI / 2);
     }
   } catch (error) {
-    // Silent fail for activity errors
+    // Activity error - ignore
   }
 }
 
@@ -338,31 +417,28 @@ function antiAFKMovement(botData) {
   if (!bot) return;
   
   const actions = [
-    () => bot.setControlState('jump', true),
-    () => bot.look(Math.random() * Math.PI * 2, Math.random() * Math.PI - Math.PI / 2),
     () => {
-      const dir = ['forward', 'back', 'left', 'right'][Math.floor(Math.random() * 4)];
-      bot.setControlState(dir, true);
+      bot.setControlState('jump', true);
       setTimeout(() => {
-        if (bot) bot.setControlState(dir, false);
-      }, 300);
+        if (bot) bot.setControlState('jump', false);
+      }, 200);
+    },
+    () => {
+      bot.look(Math.random() * Math.PI * 2, Math.random() * Math.PI - Math.PI / 2);
     }
   ];
   
   const action = actions[Math.floor(Math.random() * actions.length)];
   action();
-  
-  if (action === actions[0]) {
-    setTimeout(() => {
-      if (bot) bot.setControlState('jump', false);
-    }, 200);
-  }
 }
 
 // Send random chat
 function sendRandomChat(botData) {
   const bot = botData.instance;
-  if (!bot) return;
+  if (!bot || botData.status !== 'connected') return;
+  
+  const now = Date.now();
+  if (now - botData.metadata.lastChat < 30000) return; // 30 second cooldown
   
   const messages = {
     agent: [
@@ -371,7 +447,7 @@ function sendRandomChat(botData) {
       'Reporting in.',
       'Area secure.',
       'Proceeding as planned.',
-      'Target acquired.'
+      'Surveillance ongoing.'
     ],
     cropton: [
       'Found some ores!',
@@ -388,49 +464,91 @@ function sendRandomChat(botData) {
   
   bot.chat(message);
   botData.stats.messages++;
+  botData.metadata.lastChat = now;
   log(`💬 ${botData.name}: ${message}`);
 }
 
-// Cleanup bot
-function cleanupBot(botData) {
-  if (botData.intervals.length > 0) {
-    botData.intervals.forEach(interval => clearInterval(interval));
+// Cleanup bot intervals
+function cleanupBotIntervals(botData) {
+  if (botData.intervals && botData.intervals.length > 0) {
+    botData.intervals.forEach(interval => {
+      try {
+        clearInterval(interval);
+      } catch (error) {
+        // Ignore interval clearing errors
+      }
+    });
     botData.intervals = [];
   }
 }
 
-// Start all bots
+// Cleanup bot
+function cleanupBot(botData) {
+  cleanupBotIntervals(botData);
+  
+  if (botData.instance) {
+    try {
+      botData.instance.quit();
+    } catch (error) {
+      // Ignore quit errors
+    }
+    botData.instance = null;
+  }
+}
+
+// Start all bots with anti-throttling
 async function startAllBots() {
   log('='.repeat(60));
-  log('🚀 STARTING MINECRAFT BOTS');
+  log('🚀 STARTING BOTS WITH ANTI-THROTTLING');
   log('='.repeat(60));
   log(`🌐 Server: ${CONFIG.SERVER.host}:${CONFIG.SERVER.port}`);
   log(`🤖 Bots: ${CONFIG.BOTS.map(b => b.name).join(', ')}`);
+  log(`⏳ Initial delay: ${CONFIG.CONNECTION.initialDelay / 1000} seconds`);
+  log(`⏳ Between bots: ${CONFIG.CONNECTION.betweenBots / 1000} seconds`);
   log('='.repeat(60));
   
-  // Start bots with staggered delays
+  // Wait initial delay
+  log(`⏳ Waiting ${CONFIG.CONNECTION.initialDelay / 1000} seconds before first connection...`);
+  await sleep(CONFIG.CONNECTION.initialDelay);
+  
+  // Start bots with delays
   for (let i = 0; i < CONFIG.BOTS.length; i++) {
     const botConfig = CONFIG.BOTS[i];
-    const delay = i * 5000; // 5 seconds between each bot
+    const delay = i * CONFIG.CONNECTION.betweenBots;
     
-    await createBot(botConfig, delay);
+    if (delay > 0) {
+      log(`⏳ Waiting ${delay / 1000} seconds before next bot...`);
+      await sleep(delay);
+    }
+    
+    await scheduleBotConnection(botConfig, 0);
   }
   
-  log('✅ All bots started!');
-  log('📊 Bot status will be shown below...');
+  log('✅ All bots scheduled for connection!');
+  log('📊 Status monitor starting...');
   log('='.repeat(60));
 }
 
-// Display bot status periodically
+// Sleep function
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Display status periodically
 function startStatusMonitor() {
   setInterval(() => {
-    const connectedBots = Array.from(activeBots.values()).filter(b => b.status === 'connected');
+    const connectedBots = Array.from(activeBots.values())
+      .filter(b => b.status === 'connected');
     
-    if (connectedBots.length > 0) {
-      console.log('\n' + '='.repeat(60));
-      console.log('📊 BOT STATUS - ' + new Date().toLocaleTimeString());
-      console.log('='.repeat(60));
-      console.log(`Connected: ${connectedBots.length}/${activeBots.size}`);
+    console.log('\n' + '='.repeat(60));
+    console.log('📊 BOT STATUS - ' + new Date().toLocaleTimeString());
+    console.log('='.repeat(60));
+    
+    if (connectedBots.length === 0) {
+      console.log('No bots currently connected');
+      console.log('Bots will auto-reconnect with anti-throttling');
+    } else {
+      console.log(`Connected: ${connectedBots.length} bot(s)`);
       
       connectedBots.forEach(bot => {
         const uptime = Math.floor((Date.now() - bot.stats.connectedAt) / 1000);
@@ -443,61 +561,75 @@ function startStatusMonitor() {
         console.log(`  Uptime: ${minutes}m ${seconds}s | Messages: ${bot.stats.messages}`);
         console.log(`  Position: ${bot.position ? `${bot.position.x}, ${bot.position.y}, ${bot.position.z}` : 'Unknown'}`);
       });
-      
-      console.log('\n' + '='.repeat(60));
     }
-  }, 30000); // Every 30 seconds
+    
+    // Show queued connections
+    const queued = Object.entries(connectionAttempts)
+      .filter(([name, attempts]) => attempts > 0 && 
+        (!activeBots.has(name) || activeBots.get(name).status !== 'connected'))
+      .map(([name, attempts]) => `${name} (${attempts} attempts)`);
+    
+    if (queued.length > 0) {
+      console.log('\n🔄 Queued/Retrying: ' + queued.join(', '));
+    }
+    
+    console.log('\n' + '='.repeat(60));
+  }, 45000); // Every 45 seconds
 }
 
-// Minimal HTTP server to keep Render.com happy
+// Minimal HTTP server for Render.com
 function startMinimalServer() {
   const http = require('http');
   
   const server = http.createServer((req, res) => {
-    // Only respond to root path
-    if (req.url === '/') {
-      const connectedBots = Array.from(activeBots.values()).filter(b => b.status === 'connected');
+    if (req.url === '/' || req.url === '/status') {
+      const connectedBots = Array.from(activeBots.values())
+        .filter(b => b.status === 'connected');
       
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end(`
         <!DOCTYPE html>
         <html>
         <head>
-          <title>Minecraft Bots - Auto Mode</title>
+          <title>Minecraft Bots - Anti-Throttling Mode</title>
           <meta name="viewport" content="width=device-width, initial-scale=1">
           <style>
             body { font-family: monospace; background: #0a0a0a; color: #0f0; padding: 20px; }
             .status { background: #1a1a1a; padding: 15px; margin: 10px 0; border-radius: 5px; }
+            .connected { border-left: 5px solid #0f0; }
+            .connecting { border-left: 5px solid #ff0; }
+            .disconnected { border-left: 5px solid #f00; }
           </style>
         </head>
         <body>
-          <h1>🤖 Minecraft Bot System - AUTO MODE</h1>
+          <h1>🤖 Minecraft Bot System - ANTI-THROTTLING MODE</h1>
           <p>Server: ${CONFIG.SERVER.host}:${CONFIG.SERVER.port}</p>
-          <p>Connected Bots: ${connectedBots.length}/${activeBots.size}</p>
-          <p>Status: Running (Check Render.com logs for details)</p>
+          <p>Connected Bots: ${connectedBots.length}</p>
+          <p>Mode: Anti-Throttling Active (Smart Connection Timing)</p>
           <hr>
-          <h3>Active Bots:</h3>
-          ${connectedBots.map(bot => `
-            <div class="status">
-              <strong>${bot.name} (${bot.type})</strong><br>
+          <h3>Bot Status:</h3>
+          ${Array.from(activeBots.values()).map(bot => `
+            <div class="status ${bot.status}">
+              <strong>${bot.name} (${bot.type}) - ${bot.status.toUpperCase()}</strong><br>
               Health: ${bot.health}/20 | Activity: ${bot.activity}<br>
-              Messages: ${bot.stats.messages} | Mined: ${bot.stats.mined}
+              Messages: ${bot.stats.messages} | Connection Attempts: ${bot.stats.connectionAttempts}
             </div>
           `).join('')}
-          ${connectedBots.length === 0 ? '<p>No bots currently connected. Starting soon...</p>' : ''}
+          ${activeBots.size === 0 ? '<p>Bots initializing with anti-throttling delay...</p>' : ''}
+          <hr>
+          <p><small>This system automatically manages connection timing to avoid server throttling.</small></p>
         </body>
         </html>
       `);
     } else {
       res.writeHead(404);
-      res.end('Not Found');
+      res.end('Not Found - Bot System Running');
     }
   });
   
-  const PORT = process.env.PORT || 3000;
+  const PORT = process.env.PORT || 10000;
   server.listen(PORT, () => {
-    log(`🌐 Minimal web server started on port ${PORT} (Render.com requirement)`);
-    log(`📱 You can view status at: http://localhost:${PORT}`);
+    log(`🌐 Minimal status server on port ${PORT}`);
   });
   
   return server;
@@ -506,18 +638,12 @@ function startMinimalServer() {
 // Graceful shutdown
 function setupShutdownHandler() {
   process.on('SIGINT', () => {
-    console.log('\n\n🛑 Shutting down bots...');
+    console.log('\n\n🛑 Shutting down bots gracefully...');
     
     let stopped = 0;
     activeBots.forEach(bot => {
-      if (bot.instance) {
-        try {
-          bot.instance.quit();
-          stopped++;
-        } catch (e) {
-          // Ignore
-        }
-      }
+      cleanupBot(bot);
+      stopped++;
     });
     
     console.log(`✅ Stopped ${stopped} bots`);
@@ -528,26 +654,26 @@ function setupShutdownHandler() {
 
 // Main function
 async function main() {
-  log('Initializing Minecraft Bot System...');
+  log('Initializing Minecraft Bot System with Anti-Throttling...');
   
-  // Start minimal web server for Render.com
+  // Start minimal server for Render.com
   startMinimalServer();
   
   // Setup shutdown handler
   setupShutdownHandler();
   
-  // Wait 2 seconds for server to start
-  await new Promise(resolve => setTimeout(resolve, 2000));
+  // Wait 2 seconds
+  await sleep(2000);
   
-  // Start all bots
+  // Start all bots with anti-throttling
   await startAllBots();
   
   // Start status monitor
   startStatusMonitor();
   
-  log('✅ System initialized and running!');
-  log('🤖 Bots will auto-reconnect if disconnected');
-  log('📊 Check Render.com logs for detailed activity');
+  log('✅ System initialized!');
+  log('🤖 Bots will connect with anti-throttling delays');
+  log('📊 Check Render.com logs for connection status');
 }
 
 // Start everything
