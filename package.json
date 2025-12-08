@@ -1,14 +1,13 @@
 {
-  "name": "minecraft-bot-autostart",
+  "name": "minecraft-bots-autostart",
   "version": "1.0.0",
-  "description": "Minecraft Bot System with Auto-Start (No Dashboard)",
-  "main": "server.js",
+  "description": "Minecraft Bots - Auto Start Only, No Dashboard",
+  "main": "index.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node index.js"
   },
   "dependencies": {
-    "mineflayer": "^4.15.0",
-    "dotenv": "^16.3.1"
+    "mineflayer": "^4.15.0"
   },
   "engines": {
     "node": "18.x"
