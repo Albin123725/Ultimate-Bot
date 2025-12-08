@@ -7,14 +7,7 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 18.17.0
-      - key: MINECRAFT_HOST
-        value: gameplannet.aternos.me
-      - key: MINECRAFT_PORT
-        value: 43658
-      - key: MINECRAFT_VERSION
-        value: 1.21.10
-    healthCheckPath: /health
-    # Disable health check since there's no web server
-    healthCheckPath: /nonexistent
-    # Keep alive even if no web requests
-    autoDeploy: false
+      - key: PORT
+        value: 10000
+    healthCheckPath: /
+    autoDeploy: true
