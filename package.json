@@ -4,11 +4,11 @@
   "description": "Creative Mode Bot System with Auto-Sleep",
   "main": "main.js",
   "scripts": {
-    "start": "node main.js",
-    "setup": "node setup.js"
+    "start": "node main.js"
   },
   "dependencies": {
-    "mineflayer": "^4.15.0"
+    "mineflayer": "^4.15.0",
+    "debug": "^4.3.4"
   },
   "engines": {
     "node": "18.x"
