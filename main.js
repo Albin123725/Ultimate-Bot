@@ -4,6 +4,7 @@
 // ============================================================
 
 const mineflayer = require('mineflayer');
+const Vec3 = require('vec3').Vec3;
 
 console.log(`
 ╔══════════════════════════════════════════════════════════════════════════╗
@@ -145,8 +146,12 @@ class PerfectSleepSystem {
     ];
     
     for (const position of positions) {
-      const block = this.bot.blockAt(this.bot.vec3(position.x, position.y, position.z));
-      const blockBelow = this.bot.blockAt(this.bot.vec3(position.x, position.y - 1, position.z));
+      // Create Vec3 properly
+      const blockPos = new Vec3(position.x, position.y, position.z);
+      const blockBelowPos = new Vec3(position.x, position.y - 1, position.z);
+      
+      const block = this.bot.blockAt(blockPos);
+      const blockBelow = this.bot.blockAt(blockBelowPos);
       
       if (block && block.name === 'air' && 
           blockBelow && blockBelow.name !== 'air' && 
@@ -161,11 +166,19 @@ class PerfectSleepSystem {
   async placeBedAt(position) {
     try {
       this.bot.setQuickBarSlot(0);
-      await this.bot.lookAt(this.bot.vec3(position.x, position.y, position.z));
       
-      const referenceBlock = this.bot.blockAt(this.bot.vec3(position.x, position.y - 1, position.z));
+      // Create Vec3 for looking
+      const lookPos = new Vec3(position.x, position.y, position.z);
+      await this.bot.lookAt(lookPos);
+      
+      // Create Vec3 for block below
+      const referenceBlockPos = new Vec3(position.x, position.y - 1, position.z);
+      const referenceBlock = this.bot.blockAt(referenceBlockPos);
+      
       if (referenceBlock) {
-        await this.bot.placeBlock(referenceBlock, this.bot.vec3(0, 1, 0));
+        // Create offset Vec3
+        const offset = new Vec3(0, 1, 0);
+        await this.bot.placeBlock(referenceBlock, offset);
         return true;
       }
     } catch (error) {
@@ -177,7 +190,10 @@ class PerfectSleepSystem {
 
   async sleepInPlacedBed(bedPosition) {
     try {
-      const bedBlock = this.bot.blockAt(this.bot.vec3(bedPosition.x, bedPosition.y, bedPosition.z));
+      // Create Vec3 for bed position
+      const bedPos = new Vec3(bedPosition.x, bedPosition.y, bedPosition.z);
+      const bedBlock = this.bot.blockAt(bedPos);
+      
       if (bedBlock && bedBlock.name.includes('bed')) {
         await this.sleepInBed(bedBlock);
       }
@@ -241,7 +257,10 @@ class PerfectSleepSystem {
 
   async breakBed(position) {
     try {
-      const bedBlock = this.bot.blockAt(this.bot.vec3(position.x, position.y, position.z));
+      // Create Vec3 for bed position
+      const bedPos = new Vec3(position.x, position.y, position.z);
+      const bedBlock = this.bot.blockAt(bedPos);
+      
       if (bedBlock && bedBlock.name.includes('bed')) {
         await this.bot.dig(bedBlock);
         await this.delay(1000);
@@ -595,7 +614,9 @@ class CreativeBot {
       const offsetX = Math.floor(Math.random() * 5) - 2;
       const offsetZ = Math.floor(Math.random() * 5) - 2;
       
-      const placePos = this.bot.vec3(
+      // Create Vec3 for position
+      const Vec3 = require('vec3').Vec3;
+      const placePos = new Vec3(
         Math.floor(pos.x) + offsetX,
         Math.floor(pos.y),
         Math.floor(pos.z) + offsetZ
@@ -609,7 +630,7 @@ class CreativeBot {
         // Then place it
         setTimeout(() => {
           if (this.bot) {
-            this.bot.placeBlock(block, this.bot.vec3(0, 1, 0));
+            this.bot.placeBlock(block, new Vec3(0, 1, 0));
             console.log(`🧱 ${this.state.username}: Placed ${blockType}`);
           }
         }, 100);
