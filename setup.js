@@ -1,70 +1,76 @@
-const fs = require('fs');
-const readline = require('readline');
+const fs = require('fs-extra');
+const path = require('path');
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout
-});
-
-async function setup() {
-  console.log(`
+console.log(`
 ╔══════════════════════════════════════════════════════════╗
-║   🚀 Minecraft Bot System Setup                          ║
-║   ⚡ Simple Configuration                                ║
+║   🛠️  Creative Bot System Setup                         ║
+║   🎮 Auto-Sleep • Bed Management • Creative Mode        ║
 ╚══════════════════════════════════════════════════════════╝
 `);
-  
-  console.log('\n📝 Configuration:');
-  console.log('Default: gameplannet.aternos.me:34286 (1.21.10)');
-  
-  const useDefault = await ask('Use default settings? (y/n): ');
-  
-  let config = '';
-  
-  if (useDefault.toLowerCase() === 'y') {
-    config = `PORT=10000
-MINECRAFT_HOST=gameplannet.aternos.me
-MINECRAFT_PORT=34286
-MINECRAFT_VERSION=1.21.10`;
-  } else {
-    const host = await ask('Minecraft server host: ');
-    const port = await ask('Minecraft server port: ');
-    const version = await ask('Minecraft version: ');
-    const appPort = await ask('Web dashboard port (default: 10000): ') || '10000';
+
+async function setup() {
+  try {
+    // Create directories
+    const dirs = ['logs', 'data', 'backups'];
     
-    config = `PORT=${appPort}
-MINECRAFT_HOST=${host}
-MINECRAFT_PORT=${port}
-MINECRAFT_VERSION=${version}`;
+    for (const dir of dirs) {
+      await fs.ensureDir(path.join(__dirname, dir));
+      console.log(`✓ Created directory: ${dir}`);
+    }
+    
+    // Create README
+    const readme = `
+# 🎮 Creative Mode Bot System
+
+## Features:
+- 🤖 4 Bots with different personalities
+- 🎮 Always Creative Mode
+- 😴 Auto-Sleep at night
+- 🛏️ Automatic Bed Management
+- ⏰ Day/Night cycle awareness
+- 🔄 Auto-reconnect on disconnect
+
+## Bot Personalities:
+1. **CreativeBob** - Builder, focuses on structures
+2. **CreativeEve** - Explorer, loves mapping areas
+3. **CreativeMike** - Miner, always digging
+4. **CreativeSally** - Socializer, chats with players
+
+## Sleep System:
+- Bots sleep IMMEDIATELY when night comes
+- If no bed nearby, they place one from creative inventory
+- In morning, they break the bed
+- Cycle repeats every night
+
+## Server Configuration:
+- Server: gameplannet.aternos.me:43658
+- Mode: Creative
+- Version: 1.21.10
+
+## Commands:
+- npm start - Start the system
+- Check http://localhost:10000 for status
+
+## Notes:
+- Make sure server is in creative mode
+- Bots need OP to use /give and /gamemode
+- Server must be online before starting
+    `;
+    
+    await fs.writeFile(path.join(__dirname, 'README.md'), readme);
+    console.log('✓ Created README.md');
+    
+    console.log('\n' + '='.repeat(60));
+    console.log('✅ SETUP COMPLETE!');
+    console.log('='.repeat(60));
+    console.log('🚀 To start: npm start');
+    console.log('🌐 Status: http://localhost:10000');
+    console.log('='.repeat(60));
+    
+  } catch (error) {
+    console.error(`❌ Setup failed: ${error.message}`);
+    process.exit(1);
   }
-  
-  // Write .env file
-  fs.writeFileSync('.env', config);
-  
-  console.log('\n✅ Configuration saved to .env');
-  console.log('\n🎮 Next steps:');
-  console.log('   1. Install dependencies: npm install');
-  console.log('   2. Start the system: npm start');
-  console.log('   3. Open dashboard: http://localhost:10000');
-  console.log('\n🤖 Available bot types:');
-  console.log('   • Agent - Stealth operative');
-  console.log('   • Cropton - Master miner');
-  console.log('   • CraftMan - Expert builder');
-  console.log('   • HeroBrine - Mysterious entity');
-  
-  rl.close();
 }
 
-function ask(question) {
-  return new Promise(resolve => {
-    rl.question(question, answer => {
-      resolve(answer.trim());
-    });
-  });
-}
-
-if (require.main === module) {
-  setup().catch(console.error);
-}
-
-module.exports = { setup };
+setup();
