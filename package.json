@@ -7,30 +7,24 @@
     "start": "node main.js",
     "setup": "node setup.js",
     "train": "node train-neural.js",
-    "monitor": "node monitor.js",
-    "proxy-setup": "node proxy-manager.js"
+    "monitor": "node monitor.js"
   },
   "dependencies": {
     "mineflayer": "^4.15.0",
     "minecraft-protocol": "^1.43.2",
-    "uuid": "^9.0.0",
+    "uuid": "^9.0.1",
     "moment": "^2.29.4",
     "chance": "^1.1.11",
-    "fs-extra": "^11.1.1",
-    "axios": "^1.6.0",
+    "fs-extra": "^11.2.0",
+    "axios": "^1.6.2",
     "crypto-js": "^4.2.0",
-    "geoip-lite": "^1.4.8",
+    "geoip-lite": "^1.4.11",
     "user-agents": "^1.1.3",
-    "brain.js": "^2.0.0",
+    "brain.js": "^0.7.0",
     "natural": "^6.8.0",
+    "compromise": "^14.12.3",
     "node-schedule": "^2.1.1",
-    "socket.io": "^4.7.2",
-    "sharp": "^0.33.0",
-    "node-canvas": "^2.11.2",
-    "puppeteer": "^21.7.0",
-    "cheerio": "^1.0.0-rc.12",
-    "form-data": "^4.0.0",
-    "ws": "^8.14.2"
+    "socket.io": "^4.7.3"
   },
   "engines": {
     "node": "18.x"
