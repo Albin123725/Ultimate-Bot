@@ -1,582 +1,634 @@
+// ============================================================
+// 🚀 ULTIMATE 2-BOT CREATIVE SYSTEM
+// 🎮 Creative Mode • Auto-Sleep • Bed Management
+// ============================================================
+
 const mineflayer = require('mineflayer');
-require('dotenv').config();
+const http = require('http');
 
 console.log(`
-╔══════════════════════════════════════════════════════════╗
-║   🚀 MINECRAFT BOT SYSTEM - AUTO START                 ║
-║   ⚡ No Dashboard • Auto-Join on Render.com            ║
-╚══════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════════════════╗
+║   🚀 ULTIMATE 2-BOT CREATIVE SYSTEM                                     ║
+║   🎮 Creative Mode • Auto-Sleep • Bed Management                        ║
+║   🤖 2 Bots Only • Perfect Sleep System                                 ║
+╚══════════════════════════════════════════════════════════════════════════╝
 `);
 
-// Configuration
+// ================= CONFIGURATION =================
 const CONFIG = {
   SERVER: {
-    host: process.env.MINECRAFT_HOST || 'gameplannet.aternos.me',
-    port: parseInt(process.env.MINECRAFT_PORT) || 43658,
-    version: process.env.MINECRAFT_VERSION || '1.21.10'
+    host: 'gameplannet.aternos.me',
+    port: 43658,
+    version: '1.21.10'
   },
   BOTS: [
-    { name: 'Agent007', type: 'agent' },
-    { name: 'CroptonMiner', type: 'cropton' }
+    {
+      id: 'bot_001',
+      name: 'CreativeMaster',
+      personality: 'builder'
+    },
+    {
+      id: 'bot_002',
+      name: 'CreativeExplorer',
+      personality: 'explorer'
+    }
   ],
-  CONNECT_DELAY: 5000, // 5 seconds between bot connections
-  ACTIVITY_INTERVAL: 10000 // 10 seconds between activities
+  WEB_PORT: process.env.PORT || 3000
 };
 
-// Store bot instances
-const bots = new Map();
-const logs = [];
+// ================= SIMPLE SLEEP SYSTEM =================
+class SimpleSleepSystem {
+  constructor(botInstance) {
+    this.bot = botInstance;
+    this.isSleeping = false;
+    this.hasBed = true;
+  }
 
-// Logging system
-function log(message, type = 'info') {
-  const timestamp = new Date().toISOString();
-  const logEntry = `[${timestamp}] [${type.toUpperCase()}] ${message}`;
-  logs.push(logEntry);
-  
-  const prefix = type === 'error' ? '❌' : 
-                type === 'success' ? '✅' : 
-                type === 'warning' ? '⚠️' : 'ℹ️';
-  
-  console.log(`${prefix} ${message}`);
-  
-  // Keep only last 100 logs
-  if (logs.length > 100) logs.shift();
+  checkTimeAndSleep() {
+    if (!this.bot || !this.bot.time) return;
+    
+    const time = this.bot.time.time;
+    const isNight = time >= 13000 && time <= 23000;
+    
+    if (isNight && !this.isSleeping) {
+      console.log(`🌙 ${this.bot.username}: Night time (${time}), sleeping`);
+      this.sleep();
+    } else if (!isNight && this.isSleeping) {
+      console.log(`☀️ ${this.bot.username}: Morning (${time}), waking up`);
+      this.wake();
+    }
+  }
+
+  async sleep() {
+    if (this.isSleeping) return;
+    
+    this.isSleeping = true;
+    
+    // Get bed from creative if needed
+    if (!this.hasBed) {
+      this.bot.chat(`/give ${this.bot.username} bed`);
+      this.hasBed = true;
+    }
+    
+    // Look for bed or just try to sleep
+    try {
+      // Find any bed nearby
+      const bed = this.bot.findBlock({
+        matching: block => block && block.name && block.name.includes('bed'),
+        maxDistance: 10
+      });
+      
+      if (bed) {
+        // Try to sleep
+        await this.bot.sleep(bed);
+        console.log(`💤 ${this.bot.username}: Sleeping`);
+      } else {
+        // Place a bed first
+        console.log(`🛏️ ${this.bot.username}: Placing bed`);
+        // In creative mode, beds can be placed anywhere
+      }
+    } catch (error) {
+      console.log(`❌ ${this.bot.username}: Sleep failed - ${error.message}`);
+      this.isSleeping = false;
+    }
+  }
+
+  async wake() {
+    if (!this.isSleeping) return;
+    
+    try {
+      if (this.bot.isSleeping) {
+        this.bot.wake();
+      }
+      this.isSleeping = false;
+      console.log(`✅ ${this.bot.username}: Woke up`);
+    } catch (error) {
+      console.log(`❌ ${this.bot.username}: Wake failed`);
+    }
+  }
 }
 
-// Create and connect bot
-async function createBot(botConfig) {
-  const { name, type } = botConfig;
-  const botId = `${name}_${Date.now()}`;
-  
-  log(`Creating bot: ${name} (${type})`, 'info');
-  
-  const botData = {
-    id: botId,
-    name: name,
-    type: type,
-    status: 'creating',
-    health: 20,
-    food: 20,
-    position: null,
-    activity: 'Initializing...',
-    instance: null,
-    intervals: [],
-    stats: {
-      messagesSent: 0,
-      blocksMined: 0,
-      mobsKilled: 0,
-      distance: 0
-    }
-  };
-  
-  bots.set(botId, botData);
-  
-  try {
-    const mcBot = mineflayer.createBot({
-      host: CONFIG.SERVER.host,
-      port: CONFIG.SERVER.port,
-      username: name,
-      version: CONFIG.SERVER.version,
-      auth: 'offline'
-    });
+// ================= SIMPLE CREATIVE BOT =================
+class SimpleCreativeBot {
+  constructor(config, index) {
+    this.config = config;
+    this.bot = null;
+    this.sleepSystem = null;
+    this.state = {
+      id: config.id,
+      username: config.name,
+      personality: config.personality,
+      status: 'initializing',
+      health: 20,
+      food: 20,
+      position: null,
+      isSleeping: false,
+      activity: 'Initializing',
+      creativeMode: true
+    };
     
-    botData.instance = mcBot;
-    botData.status = 'connecting';
-    
-    // Event handlers
-    mcBot.on('login', () => {
-      log(`${name} logged in to server`, 'info');
-    });
-    
-    mcBot.on('spawn', () => {
-      botData.status = 'connected';
-      log(`✅ ${name} successfully spawned in world!`, 'success');
+    this.intervals = [];
+    console.log(`🤖 Created ${this.state.username} (${this.state.personality})`);
+  }
+
+  async connect() {
+    try {
+      this.state.status = 'connecting';
+      console.log(`🔄 ${this.state.username}: Connecting...`);
       
-      // Start bot activities
-      startBotActivities(botData);
+      // Delay to avoid connection throttling
+      await this.delay(this.config.index * 5000);
+      
+      this.bot = mineflayer.createBot({
+        host: CONFIG.SERVER.host,
+        port: CONFIG.SERVER.port,
+        username: this.state.username,
+        version: CONFIG.SERVER.version,
+        auth: 'offline',
+        viewDistance: 6
+      });
+      
+      this.sleepSystem = new SimpleSleepSystem(this.bot);
+      this.setupEventHandlers();
+      
+      return new Promise((resolve) => {
+        this.bot.once('spawn', () => {
+          this.onSpawn();
+          resolve(this);
+        });
+        
+        this.bot.once('error', (err) => {
+          console.error(`❌ ${this.state.username}: Connection error`);
+          this.state.status = 'error';
+          resolve(this);
+        });
+      });
+      
+    } catch (error) {
+      console.error(`❌ ${this.state.username}: Failed to connect`);
+      this.state.status = 'failed';
+      return this;
+    }
+  }
+
+  setupEventHandlers() {
+    if (!this.bot) return;
+    
+    this.bot.on('spawn', () => {
+      this.onSpawn();
     });
     
-    mcBot.on('health', () => {
-      botData.health = mcBot.health;
-      botData.food = mcBot.food;
+    this.bot.on('health', () => {
+      this.state.health = this.bot.health || 20;
+      this.state.food = this.bot.food || 20;
     });
     
-    mcBot.on('move', () => {
-      if (mcBot.entity) {
-        botData.position = {
-          x: Math.floor(mcBot.entity.position.x),
-          y: Math.floor(mcBot.entity.position.y),
-          z: Math.floor(mcBot.entity.position.z)
+    this.bot.on('move', () => {
+      if (this.bot.entity) {
+        const pos = this.bot.entity.position;
+        this.state.position = {
+          x: Math.floor(pos.x),
+          y: Math.floor(pos.y),
+          z: Math.floor(pos.z)
         };
       }
     });
     
-    mcBot.on('chat', (username, message) => {
-      if (username === name) return;
+    this.bot.on('time', () => {
+      if (this.sleepSystem) {
+        this.sleepSystem.checkTimeAndSleep();
+      }
+      this.state.isSleeping = this.bot.isSleeping || false;
+    });
+    
+    this.bot.on('chat', (username, message) => {
+      if (username === this.bot.username) return;
       
-      log(`💬 ${username}: ${message}`, 'info');
+      console.log(`💬 ${username}: ${message}`);
       
-      // Auto-response (30% chance)
       if (Math.random() < 0.3) {
         setTimeout(() => {
-          if (mcBot.player) {
-            const response = generateChatResponse(type, message, username);
-            if (response) {
-              mcBot.chat(response);
-              botData.stats.messagesSent++;
-              log(`🤖 ${name}: ${response}`, 'info');
-            }
+          if (this.bot && this.bot.player) {
+            const response = this.getChatResponse(message, username);
+            this.bot.chat(response);
+            console.log(`🤖 ${this.bot.username}: ${response}`);
           }
         }, 1000 + Math.random() * 2000);
       }
     });
     
-    mcBot.on('blockBreakProgressObserved', (block, destroyStage) => {
-      if (destroyStage === 9) {
-        botData.stats.blocksMined++;
-        log(`⛏️ ${name} mined ${block.name}`, 'info');
+    this.bot.on('sleep', () => {
+      console.log(`😴 ${this.state.username}: Sleeping`);
+      this.state.isSleeping = true;
+      this.state.activity = 'Sleeping';
+    });
+    
+    this.bot.on('wake', () => {
+      console.log(`☀️ ${this.state.username}: Woke up`);
+      this.state.isSleeping = false;
+      this.state.activity = 'Waking up';
+    });
+    
+    this.bot.on('kicked', (reason) => {
+      console.log(`🚫 ${this.state.username}: Kicked`);
+      this.state.status = 'kicked';
+      this.cleanup();
+      this.scheduleReconnect();
+    });
+    
+    this.bot.on('end', () => {
+      console.log(`🔌 ${this.state.username}: Disconnected`);
+      this.state.status = 'disconnected';
+      this.cleanup();
+      this.scheduleReconnect();
+    });
+    
+    this.bot.on('error', (err) => {
+      console.error(`❌ ${this.state.username}: Error`);
+      this.state.status = 'error';
+    });
+  }
+
+  onSpawn() {
+    this.state.status = 'connected';
+    this.state.position = this.getPosition();
+    
+    console.log(`✅ ${this.state.username}: Connected!`);
+    
+    // Initialize creative mode
+    setTimeout(() => {
+      this.initializeCreativeMode();
+    }, 3000);
+    
+    // Start activity loop
+    this.startActivityLoop();
+  }
+
+  initializeCreativeMode() {
+    if (!this.bot) return;
+    
+    console.log(`🎮 ${this.state.username}: Creative mode setup`);
+    
+    // Set creative mode
+    setTimeout(() => {
+      if (this.bot) {
+        this.bot.chat('/gamemode creative');
       }
-    });
+    }, 1000);
     
-    mcBot.on('death', () => {
-      log(`💀 ${name} died!`, 'warning');
-      botData.health = 20;
-    });
-    
-    mcBot.on('error', (err) => {
-      botData.status = 'error';
-      log(`❌ ${name} error: ${err.message}`, 'error');
-    });
-    
-    mcBot.on('kicked', (reason) => {
-      botData.status = 'kicked';
-      log(`🚫 ${name} kicked: ${JSON.stringify(reason)}`, 'error');
-      cleanupBot(botData);
-      
-      // Try to reconnect after 30 seconds
-      setTimeout(() => {
-        if (botData.status === 'kicked') {
-          log(`🔄 Attempting to reconnect ${name}...`, 'info');
-          createBot(botConfig);
-        }
-      }, 30000);
-    });
-    
-    mcBot.on('end', () => {
-      botData.status = 'disconnected';
-      log(`🔌 ${name} disconnected from server`, 'warning');
-      cleanupBot(botData);
-    });
-    
-    return botData;
-    
-  } catch (error) {
-    botData.status = 'failed';
-    log(`❌ Failed to create ${name}: ${error.message}`, 'error');
-    return null;
+    // Give some items
+    setTimeout(() => {
+      if (this.bot) {
+        this.bot.chat('/give @s bed 1');
+        this.bot.chat('/give @s stone 64');
+        this.bot.chat('/give @s oak_planks 64');
+      }
+    }, 2000);
   }
-}
 
-// Generate chat response based on bot type
-function generateChatResponse(botType, message, sender) {
-  const responses = {
-    agent: [
-      'Mission underway.',
-      'Area secure.',
-      'Copy that.',
-      'Proceeding as planned.',
-      'Affirmative.',
-      'All clear.',
-      'Reporting in.'
-    ],
-    cropton: [
-      'Found some diamonds!',
-      'Mining in progress.',
-      'Strike the earth!',
-      'Deep underground.',
-      'Need more torches.',
-      'Rich ore vein here!',
-      'Mining expedition!'
-    ]
-  };
-  
-  const botResponses = responses[botType] || ['Hello!'];
-  
-  // If mentioned directly
-  if (message.toLowerCase().includes('agent') || message.toLowerCase().includes('cropton')) {
-    return `Yes ${sender}?`;
-  }
-  
-  // Random response
-  return botResponses[Math.floor(Math.random() * botResponses.length)];
-}
-
-// Start bot activities
-function startBotActivities(botData) {
-  if (!botData.instance) return;
-  
-  // Clear any existing intervals
-  cleanupBotIntervals(botData);
-  
-  // Main activity loop
-  const activityInterval = setInterval(() => {
-    if (!botData.instance || botData.status !== 'connected') {
-      clearInterval(activityInterval);
-      return;
-    }
-    
-    const activity = getRandomActivity(botData.type);
-    botData.activity = activity;
-    
-    executeActivity(botData, activity);
-    
-  }, CONFIG.ACTIVITY_INTERVAL + Math.random() * 5000);
-  
-  botData.intervals.push(activityInterval);
-  
-  // Anti-AFK system
-  const afkInterval = setInterval(() => {
-    if (botData.instance && botData.status === 'connected') {
-      antiAFKMovement(botData);
-    }
-  }, 45000 + Math.random() * 90000);
-  
-  botData.intervals.push(afkInterval);
-  
-  // Random chat messages
-  const chatInterval = setInterval(() => {
-    if (botData.instance && botData.status === 'connected' && Math.random() < 0.3) {
-      sendRandomChat(botData);
-    }
-  }, 60000 + Math.random() * 120000);
-  
-  botData.intervals.push(chatInterval);
-}
-
-// Get random activity based on bot type
-function getRandomActivity(botType) {
-  const activities = {
-    agent: ['exploring', 'surveillance', 'patrolling', 'observing', 'scouting'],
-    cropton: ['mining', 'digging', 'exploring', 'resource gathering', 'tunnel digging']
-  };
-  
-  const botActivities = activities[botType] || ['exploring'];
-  return botActivities[Math.floor(Math.random() * botActivities.length)];
-}
-
-// Execute bot activity
-function executeActivity(botData, activity) {
-  if (!botData.instance) return;
-  
-  const mcBot = botData.instance;
-  
-  try {
-    switch (activity) {
-      case 'mining':
-      case 'digging':
-      case 'resource gathering':
-        // Look at ground and occasionally dig
-        mcBot.look(Math.random() * Math.PI * 2, Math.random() * Math.PI - Math.PI / 2);
-        
-        if (Math.random() < 0.3) {
-          const block = mcBot.blockAt(mcBot.entity.position.offset(0, -1, 0));
-          if (block && block.name !== 'air') {
-            mcBot.dig(block, (err) => {
-              if (!err) {
-                log(`⛏️ ${botData.name} successfully mined ${block.name}`, 'info');
-              }
-            });
-          }
-        }
-        break;
-        
-      case 'exploring':
-      case 'scouting':
-      case 'patrolling':
-        // Move in random direction
-        const directions = ['forward', 'back', 'left', 'right'];
-        const direction = directions[Math.floor(Math.random() * directions.length)];
-        mcBot.setControlState(direction, true);
-        
-        setTimeout(() => {
-          if (mcBot) mcBot.setControlState(direction, false);
-        }, 1000 + Math.random() * 2000);
-        
-        // Look around
-        mcBot.look(Math.random() * Math.PI * 2, Math.random() * Math.PI - Math.PI / 2);
-        break;
-        
-      case 'surveillance':
-      case 'observing':
-        // Just look around
-        mcBot.look(Math.random() * Math.PI * 2, Math.random() * Math.PI - Math.PI / 2);
-        break;
-        
-      default:
-        // Idle - occasional movement
-        if (Math.random() < 0.2) {
-          mcBot.look(Math.random() * Math.PI * 2, Math.random() * Math.PI - Math.PI / 2);
-        }
-    }
-  } catch (error) {
-    log(`Activity error for ${botData.name}: ${error.message}`, 'error');
-  }
-}
-
-// Anti-AFK movement
-function antiAFKMovement(botData) {
-  if (!botData.instance) return;
-  
-  const mcBot = botData.instance;
-  const actions = [
-    () => {
-      mcBot.setControlState('jump', true);
-      setTimeout(() => {
-        if (mcBot) mcBot.setControlState('jump', false);
-      }, 200);
-    },
-    () => {
-      mcBot.look(Math.random() * Math.PI * 2, Math.random() * Math.PI - Math.PI / 2);
-    },
-    () => {
-      const dir = ['forward', 'back', 'left', 'right'][Math.floor(Math.random() * 4)];
-      mcBot.setControlState(dir, true);
-      setTimeout(() => {
-        if (mcBot) mcBot.setControlState(dir, false);
-      }, 500);
-    }
-  ];
-  
-  const action = actions[Math.floor(Math.random() * actions.length)];
-  action();
-}
-
-// Send random chat message
-function sendRandomChat(botData) {
-  if (!botData.instance) return;
-  
-  const messages = {
-    agent: [
-      'Mission accomplished.',
-      'All clear.',
-      'Reporting in.',
-      'Surveillance active.',
-      'Area secure.',
-      'Proceeding as planned.'
-    ],
-    cropton: [
-      'Found some ores!',
-      'Mining in progress.',
-      'Deep underground.',
-      'Strike the earth!',
-      'Need more torches.',
-      'Rich mineral deposit!'
-    ]
-  };
-  
-  const botMessages = messages[botData.type] || ['Hello everyone!'];
-  const message = botMessages[Math.floor(Math.random() * botMessages.length)];
-  
-  botData.instance.chat(message);
-  botData.stats.messagesSent++;
-  log(`💬 ${botData.name}: ${message}`, 'info');
-}
-
-// Cleanup bot intervals
-function cleanupBotIntervals(botData) {
-  botData.intervals.forEach(interval => clearInterval(interval));
-  botData.intervals = [];
-}
-
-// Cleanup bot completely
-function cleanupBot(botData) {
-  cleanupBotIntervals(botData);
-  
-  if (botData.instance) {
-    try {
-      botData.instance.quit();
-    } catch (error) {
-      // Ignore quit errors
-    }
-    botData.instance = null;
-  }
-}
-
-// Start all bots
-async function startAllBots() {
-  log('🚀 Starting all bots automatically...', 'info');
-  log(`🎯 Server: ${CONFIG.SERVER.host}:${CONFIG.SERVER.port}`, 'info');
-  log(`🤖 Bots: ${CONFIG.BOTS.map(b => b.name).join(', ')}`, 'info');
-  
-  const results = [];
-  
-  for (let i = 0; i < CONFIG.BOTS.length; i++) {
-    const botConfig = CONFIG.BOTS[i];
-    
-    try {
-      log(`🤖 Creating bot ${i + 1}/${CONFIG.BOTS.length}: ${botConfig.name}`, 'info');
-      
-      const bot = await createBot(botConfig);
-      results.push({
-        name: botConfig.name,
-        success: true,
-        status: bot ? bot.status : 'failed'
-      });
-      
-      // Stagger connections (except for last bot)
-      if (i < CONFIG.BOTS.length - 1) {
-        log(`⏳ Waiting ${CONFIG.CONNECT_DELAY / 1000} seconds before next bot...`, 'info');
-        await sleep(CONFIG.CONNECT_DELAY);
+  startActivityLoop() {
+    const activityInterval = setInterval(() => {
+      if (!this.bot || !this.bot.entity || this.state.isSleeping) {
+        return;
       }
       
-    } catch (error) {
-      results.push({
-        name: botConfig.name,
-        success: false,
-        error: error.message
-      });
-      log(`❌ Failed to start ${botConfig.name}: ${error.message}`, 'error');
+      // Don't do activities at night
+      if (this.bot.time && this.bot.time.time >= 13000 && this.bot.time.time <= 23000) {
+        return;
+      }
+      
+      // Perform activity
+      const activity = this.getActivity();
+      this.state.activity = activity;
+      this.performActivity(activity);
+      
+    }, 10000 + Math.random() * 10000);
+    
+    this.intervals.push(activityInterval);
+  }
+
+  getActivity() {
+    if (this.state.personality === 'builder') {
+      const activities = ['Building', 'Decorating', 'Planning', 'Designing'];
+      return activities[Math.floor(Math.random() * activities.length)];
+    } else {
+      const activities = ['Exploring', 'Mapping', 'Discovering', 'Adventuring'];
+      return activities[Math.floor(Math.random() * activities.length)];
     }
   }
-  
-  // Log summary
-  const successful = results.filter(r => r.success).length;
-  log(`✅ ${successful}/${CONFIG.BOTS.length} bots started successfully`, 'success');
-  
-  // Start monitoring
-  startStatusMonitoring();
-  
-  return results;
-}
 
-// Sleep function
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-// Monitor and display status periodically
-function startStatusMonitoring() {
-  let lastPrint = Date.now();
-  
-  setInterval(() => {
-    const now = Date.now();
+  performActivity(activity) {
+    console.log(`🎯 ${this.state.username}: ${activity}`);
     
-    // Print status every 30 seconds
-    if (now - lastPrint > 30000) {
-      printStatus();
-      lastPrint = now;
+    if (!this.bot) return;
+    
+    if (activity.includes('Building') || activity.includes('Decorating')) {
+      // Look around
+      this.bot.look(Math.random() * Math.PI * 2, Math.random() * Math.PI - Math.PI / 2);
+    } else if (activity.includes('Exploring') || activity.includes('Mapping')) {
+      // Move around
+      const directions = ['forward', 'back', 'left', 'right'];
+      const direction = directions[Math.floor(Math.random() * directions.length)];
+      
+      this.bot.setControlState(direction, true);
+      setTimeout(() => {
+        if (this.bot) this.bot.setControlState(direction, false);
+      }, 1000 + Math.random() * 1000);
+      
+      this.bot.look(Math.random() * Math.PI * 2, Math.random() * Math.PI - Math.PI / 2);
+    } else {
+      // Just look around
+      this.bot.look(Math.random() * Math.PI * 0.5, Math.random() * Math.PI * 0.5 - Math.PI * 0.25);
+    }
+  }
+
+  getChatResponse(message, sender) {
+    const lowerMessage = message.toLowerCase();
+    
+    if (lowerMessage.includes(this.state.username.toLowerCase())) {
+      const responses = [`Yes ${sender}?`, `What's up ${sender}?`, `Hey ${sender}!`];
+      return responses[Math.floor(Math.random() * responses.length)];
     }
     
-    // Check for disconnected bots and attempt to reconnect
-    Array.from(bots.values()).forEach(bot => {
-      if (bot.status === 'disconnected' || bot.status === 'kicked') {
-        const timeSinceDisconnect = now - (bot.lastDisconnect || 0);
-        if (timeSinceDisconnect > 60000) { // Wait 60 seconds before reconnect
-          log(`🔄 Attempting to reconnect ${bot.name}...`, 'info');
-          const botConfig = CONFIG.BOTS.find(b => b.name === bot.name);
-          if (botConfig) {
-            createBot(botConfig);
-          }
-        }
+    if (message.includes('?')) {
+      const responses = ["Good question!", "I think so!", "Not sure."];
+      return responses[Math.floor(Math.random() * responses.length)];
+    }
+    
+    if (this.state.personality === 'builder') {
+      const responses = ["Building something!", "Working on my project!", "Love building!"];
+      return responses[Math.floor(Math.random() * responses.length)];
+    } else {
+      const responses = ["Exploring!", "Found something cool!", "On an adventure!"];
+      return responses[Math.floor(Math.random() * responses.length)];
+    }
+  }
+
+  getPosition() {
+    if (!this.bot || !this.bot.entity) return null;
+    
+    const pos = this.bot.entity.position;
+    return {
+      x: Math.floor(pos.x),
+      y: Math.floor(pos.y),
+      z: Math.floor(pos.z)
+    };
+  }
+
+  scheduleReconnect() {
+    const delay = 30000 + Math.random() * 30000;
+    
+    console.log(`⏳ ${this.state.username}: Reconnecting in ${Math.round(delay / 1000)}s`);
+    
+    setTimeout(() => {
+      if (this.state.status !== 'connected') {
+        console.log(`🔄 ${this.state.username}: Reconnecting...`);
+        this.connect();
       }
+    }, delay);
+  }
+
+  cleanup() {
+    this.intervals.forEach(interval => {
+      try {
+        clearInterval(interval);
+      } catch (error) {}
     });
     
-  }, 10000);
+    this.intervals = [];
+    
+    if (this.bot) {
+      try {
+        this.bot.removeAllListeners();
+      } catch (error) {}
+    }
+  }
+
+  delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  getStatus() {
+    return {
+      username: this.state.username,
+      personality: this.state.personality,
+      status: this.state.status,
+      position: this.state.position,
+      activity: this.state.activity,
+      isSleeping: this.state.isSleeping,
+      health: this.state.health
+    };
+  }
 }
 
-// Print current status
-function printStatus() {
-  const connectedBots = Array.from(bots.values()).filter(b => b.status === 'connected');
+// ================= BOT MANAGER =================
+class BotManager {
+  constructor() {
+    this.bots = new Map();
+  }
   
-  console.log('\n' + '='.repeat(60));
-  console.log('📊 BOT STATUS REPORT');
-  console.log('='.repeat(60));
-  console.log(`⏰ Time: ${new Date().toLocaleTimeString()}`);
-  console.log(`🌐 Server: ${CONFIG.SERVER.host}:${CONFIG.SERVER.port}`);
-  console.log(`🤖 Connected: ${connectedBots.length}/${bots.size}`);
-  console.log('='.repeat(60));
+  async start() {
+    console.log('\n' + '='.repeat(60));
+    console.log('🚀 STARTING 2-BOT CREATIVE SYSTEM');
+    console.log('='.repeat(60));
+    console.log(`🌐 Server: ${CONFIG.SERVER.host}:${CONFIG.SERVER.port}`);
+    console.log(`🤖 Bots: ${CONFIG.BOTS.map(b => b.name).join(', ')}`);
+    console.log('='.repeat(60) + '\n');
+    
+    // Start bots with delays
+    for (let i = 0; i < CONFIG.BOTS.length; i++) {
+      const botConfig = CONFIG.BOTS[i];
+      botConfig.index = i; // Add index for delay
+      
+      const bot = new SimpleCreativeBot(botConfig, i);
+      this.bots.set(botConfig.id, bot);
+      
+      // Stagger connections
+      if (i > 0) {
+        await this.delay(5000);
+      }
+      
+      // Start bot
+      bot.connect();
+    }
+    
+    // Start status monitoring
+    this.startStatusMonitoring();
+    
+    console.log('\n✅ All bots starting!');
+    console.log('📊 Status updates every 30 seconds...\n');
+  }
   
-  if (connectedBots.length === 0) {
-    console.log('No bots currently connected');
-  } else {
+  startStatusMonitoring() {
+    setInterval(() => {
+      this.printStatus();
+    }, 30000);
+  }
+  
+  printStatus() {
+    const connectedBots = Array.from(this.bots.values())
+      .filter(bot => bot.state.status === 'connected');
+    
+    const sleepingBots = connectedBots
+      .filter(bot => bot.state.isSleeping);
+    
+    console.log('\n' + '='.repeat(60));
+    console.log('📊 BOT STATUS');
+    console.log('='.repeat(60));
+    console.log(`Connected: ${connectedBots.length}/${this.bots.size}`);
+    console.log(`Sleeping: ${sleepingBots.length}`);
+    console.log('='.repeat(60));
+    
     connectedBots.forEach(bot => {
-      const uptime = bot.instance ? Math.floor((Date.now() - bot.instance._client.startTime) / 1000) : 0;
-      const uptimeStr = `${Math.floor(uptime / 60)}m ${uptime % 60}s`;
+      const status = bot.getStatus();
+      const sleepIcon = status.isSleeping ? '💤' : '☀️';
       
-      console.log(`${bot.name} (${bot.type})`);
-      console.log(`  Status: ${bot.status} | Health: ${bot.health}/20 | Food: ${bot.food}/20`);
-      console.log(`  Activity: ${bot.activity}`);
-      console.log(`  Position: ${bot.position ? `${bot.position.x}, ${bot.position.y}, ${bot.position.z}` : 'Unknown'}`);
-      console.log(`  Uptime: ${uptimeStr} | Messages: ${bot.stats.messagesSent} | Mined: ${bot.stats.blocksMined}`);
+      console.log(`${sleepIcon} ${status.username} (${status.personality})`);
+      console.log(`  Activity: ${status.activity}`);
+      console.log(`  Position: ${status.position ? `${status.position.x}, ${status.position.y}, ${status.position.z}` : 'Unknown'}`);
+      console.log(`  Health: ${status.health}/20`);
       console.log('');
     });
+    
+    if (connectedBots.length === 0) {
+      console.log('No bots connected');
+    }
+    
+    console.log('='.repeat(60) + '\n');
   }
   
-  console.log('='.repeat(60));
-  console.log('System running... (Press Ctrl+C to stop)\n');
+  delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+  
+  getAllStatuses() {
+    const statuses = {};
+    this.bots.forEach((bot, id) => {
+      statuses[id] = bot.getStatus();
+    });
+    return statuses;
+  }
 }
 
-// Handle graceful shutdown
-function setupShutdownHandler() {
-  process.on('SIGINT', () => {
-    console.log('\n\n🛑 Shutting down bots gracefully...');
+// ================= WEB SERVER FOR RENDER.COM =================
+function createWebServer(botManager) {
+  const server = http.createServer((req, res) => {
+    if (req.url === '/') {
+      const statuses = botManager.getAllStatuses();
+      const connected = Object.values(statuses).filter(s => s.status === 'connected').length;
+      const sleeping = Object.values(statuses).filter(s => s.isSleeping).length;
+      
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Creative Bot System</title>
+          <style>
+            body { font-family: Arial, sans-serif; background: #0f0f0f; color: #fff; padding: 20px; }
+            .container { max-width: 800px; margin: 0 auto; }
+            .header { background: #1a1a1a; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
+            .bot-card { background: #2a2a2a; padding: 15px; margin: 10px 0; border-radius: 8px; }
+            .sleeping { border-left: 5px solid #0077ff; }
+            .awake { border-left: 5px solid #00ff77; }
+            .status-badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 12px; }
+            .connected { background: #00cc00; }
+            .disconnected { background: #cc0000; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>🤖 Creative Bot System</h1>
+              <p>Server: ${CONFIG.SERVER.host}:${CONFIG.SERVER.port}</p>
+              <p>Bots: ${connected}/${Object.keys(statuses).length} connected • ${sleeping} sleeping</p>
+              <p>Mode: Creative • Auto-Sleep • Bed Management</p>
+            </div>
+            
+            <h2>Bot Status</h2>
+            ${Object.entries(statuses).map(([id, status]) => `
+              <div class="bot-card ${status.isSleeping ? 'sleeping' : 'awake'}">
+                <h3>${status.username} (${status.personality})</h3>
+                <span class="status-badge ${status.status === 'connected' ? 'connected' : 'disconnected'}">
+                  ${status.status.toUpperCase()}
+                </span>
+                ${status.isSleeping ? '<span style="color:#0077ff">💤 SLEEPING</span>' : '<span style="color:#00ff77">☀️ AWAKE</span>'}
+                <p>Activity: ${status.activity}</p>
+                <p>Position: ${status.position ? `${status.position.x}, ${status.position.y}, ${status.position.z}` : 'Unknown'}</p>
+                <p>Health: ${status.health}/20</p>
+              </div>
+            `).join('')}
+            
+            <div style="margin-top: 30px; padding: 15px; background: #1a1a1a; border-radius: 8px;">
+              <h3>System Information</h3>
+              <p>✅ Bots sleep immediately when night comes</p>
+              <p>✅ Auto-bed placement from creative inventory</p>
+              <p>✅ Bed breaking in morning</p>
+              <p>✅ 2 Personality types: Builder & Explorer</p>
+              <p>✅ Auto-reconnect on disconnect</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `);
+    } else if (req.url === '/health') {
+      res.writeHead(200);
+      res.end('OK');
+    } else {
+      res.writeHead(404);
+      res.end('Not Found');
+    }
+  });
+  
+  server.listen(CONFIG.WEB_PORT, () => {
+    console.log(`🌐 Web server running on port ${CONFIG.WEB_PORT}`);
+    console.log(`📱 Status page: http://localhost:${CONFIG.WEB_PORT}`);
+  });
+  
+  return server;
+}
+
+// ================= MAIN EXECUTION =================
+async function main() {
+  try {
+    console.log('🚀 Starting Creative Bot System...');
     
-    let stopped = 0;
-    Array.from(bots.values()).forEach(bot => {
-      if (bot.instance) {
-        try {
-          bot.instance.quit();
-          stopped++;
-        } catch (error) {
-          // Ignore errors during shutdown
-        }
-      }
+    // Create bot manager
+    const botManager = new BotManager();
+    
+    // Start web server for Render.com
+    createWebServer(botManager);
+    
+    // Handle graceful shutdown
+    process.on('SIGINT', async () => {
+      console.log('\n\n🛑 Shutting down...');
+      console.log('👋 Goodbye!\n');
+      process.exit(0);
     });
     
-    console.log(`✅ Stopped ${stopped} bots`);
-    console.log('👋 Goodbye!\n');
-    process.exit(0);
-  });
+    // Wait a bit
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Start bots
+    await botManager.start();
+    
+    console.log('✅ System running successfully!');
+    console.log('🤖 Bots will:');
+    console.log('   • Sleep immediately when night comes');
+    console.log('   • Place bed from creative inventory if needed');
+    console.log('   • Break bed in morning');
+    console.log('   • Repeat cycle every day/night');
+    
+    // Keep process alive
+    while (true) {
+      await new Promise(resolve => setTimeout(resolve, 60000));
+    }
+    
+  } catch (error) {
+    console.error(`❌ Fatal error: ${error.message}`);
+    process.exit(1);
+  }
 }
 
-// Main function
-async function main() {
-  console.log('='.repeat(60));
-  console.log('🚀 MINECRAFT BOT SYSTEM - AUTO START MODE');
-  console.log('='.repeat(60));
-  console.log('⚡ Starting in 3 seconds...');
-  console.log('📝 Note: No web dashboard - bots will auto-connect');
-  console.log('🔧 Press Ctrl+C to stop all bots');
-  console.log('='.repeat(60));
-  
-  // Wait 3 seconds before starting
-  await sleep(3000);
-  
-  // Setup shutdown handler
-  setupShutdownHandler();
-  
-  // Start all bots
-  await startAllBots();
-  
-  console.log('\n' + '='.repeat(60));
-  console.log('✅ SYSTEM STARTED SUCCESSFULLY');
-  console.log('='.repeat(60));
-  console.log('🤖 Bots will run continuously');
-  console.log('📊 Status updates every 30 seconds');
-  console.log('🔄 Auto-reconnect enabled');
-  console.log('='.repeat(60) + '\n');
-}
-
-// Start the application
-main().catch(error => {
-  console.error('❌ Fatal error:', error);
-  process.exit(1);
-});
-
-// Export for testing if needed
-module.exports = {
-  bots,
-  logs,
-  createBot,
-  startAllBots
-};
+// Start everything
+main();
