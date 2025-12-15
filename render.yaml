@@ -1,13 +1,14 @@
 services:
   - type: web
-    name: minecraft-bots-auto
+    name: ultimate-minecraft-bots
     env: node
     buildCommand: npm install
     startCommand: npm start
     envVars:
+      - key: PORT
+        value: 3000
       - key: NODE_VERSION
         value: 18.17.0
-      - key: PORT
-        value: 10000
-    healthCheckPath: /
+    healthCheckPath: /health
     autoDeploy: true
+    plan: free
