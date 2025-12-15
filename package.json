@@ -1,10 +1,10 @@
 {
-  "name": "minecraft-bots-simple",
+  "name": "ultimate-2bot-creative-system",
   "version": "1.0.0",
-  "description": "Simple Minecraft Bots with Auto-Sleep",
-  "main": "index.js",
+  "description": "Creative Mode Bot System with Auto-Sleep",
+  "main": "server.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node server.js"
   },
   "dependencies": {
     "mineflayer": "^4.15.0"
