@@ -1,62 +1,54 @@
-# 🚀 Ultimate Minecraft Bot System v4.0
+# 🚀 Ultimate Minecraft Bot System v2.0
 
-The most advanced, feature-complete Minecraft bot system with all modern features.
+Complete Minecraft bot system with creative mode and perfect sleep management.
 
 ## ✨ Features
 
-### 🤖 Bot Types
-- **Builder**: Builds structures, farms, decorates
-- **Miner**: Efficient mining, resource collection
-- **Explorer**: Maps terrain, discovers areas
-- **Socializer**: Natural chat, player interaction
-- **Guardian**: Patrols, defends, monitors threats
+### 🤖 Bot System
+- **2 Bot Personalities**: CreativeMaster (Builder) & CreativeExplorer (Explorer)
+- **Creative Mode**: Always in creative with auto `/give` commands
+- **Perfect Sleep System**: Sleeps immediately at night (13000-23000 Minecraft time)
+- **Bed Management**: Auto-places bed if none nearby, breaks bed in morning
+- **Auto-Reconnect**: Automatically reconnects on disconnect
 
-### 🌐 Network Features
-- **100+ Proxies**: Residential, datacenter, mobile IPs
-- **IP Rotation**: Automatic proxy switching
-- **Geographic Diversity**: Multiple countries
-- **Connection Stabilization**: Prevents kicks
+### 🎮 Game Features
+- **Activity System**: Personality-based activities (building, exploring)
+- **Anti-AFK**: Random movements to prevent AFK kick
+- **Smart Chat**: Auto-responses to player messages
+- **Health Monitoring**: Tracks bot health and food levels
+- **Position Tracking**: Real-time position updates
 
-### 👤 Account Management
-- **10+ Accounts**: Different usernames
-- **Account Rotation**: Automatic switching
-- **Age Diversity**: Different creation dates
-- **Activity Patterns**: Natural human behavior
+### 🌐 Web Interface
+- **Real-time Status**: See all bots at a glance
+- **Beautiful UI**: Modern, responsive design
+- **Health Endpoint**: `/health` for monitoring
+- **JSON API**: `/api/status` for programmatic access
 
-### 🧠 AI Systems
-- **Neural Behavior**: Smart decision making
-- **Personality System**: Unique bot personalities
-- **Learning Capability**: Improves over time
-- **Context Awareness**: Adapts to environment
+## 🚀 Quick Deploy
 
-### 🛡️ Security Features
-- **Anti-Detection**: Pattern breaking
-- **Human Simulation**: Natural imperfections
-- **Failure Injection**: Random disconnects
-- **Suspicion Monitoring**: Detection avoidance
+### Option 1: Render.com (Recommended)
+1. Fork this repository
+2. Go to [render.com](https://render.com)
+3. Click "New +" → "Web Service"
+4. Connect your GitHub repository
+5. Configure:
+   - **Name**: ultimate-minecraft-bots
+   - **Environment**: Node
+   - **Build Command**: `npm install`
+   - **Start Command**: `npm start`
+   - **Plan**: Free
+6. Click "Create Web Service"
 
-### 📊 Dashboard Features
-- **Real-time Status**: Live bot monitoring
-- **Web Controls**: Start/stop bots
-- **Activity Feed**: Live event stream
-- **System Console**: Debug information
-- **Chat Control**: Manual chat sending
-- **Task Management**: Automated farming/mining
-
-## 🚀 Installation
-
-### Quick Start (One Command)
+### Option 2: Local Deployment
 ```bash
-# Create project directory
-mkdir minecraft-bot-system && cd minecraft-bot-system
-
-# Create all files from above
-
-# Run setup
-npm run setup
+# Clone repository
+git clone https://github.com/yourusername/ultimate-minecraft-bot-system.git
+cd ultimate-minecraft-bot-system
 
 # Install dependencies
 npm install
 
 # Start the system
 npm start
+
+# Access web interface: http://localhost:3000
