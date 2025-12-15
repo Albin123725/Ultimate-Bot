@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: ultimate-minecraft-bots
+    name: ultimate-minecraft-bots-fixed
     env: node
     buildCommand: npm install
     startCommand: npm start
