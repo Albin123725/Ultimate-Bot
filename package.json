@@ -1,6 +1,6 @@
 {
   "name": "ultimate-minecraft-bot-system",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Ultimate Minecraft Bot System with Creative Mode & Auto-Sleep",
   "main": "server.js",
   "scripts": {
@@ -20,7 +20,9 @@
     "bot",
     "creative",
     "aternos",
-    "render"
+    "render",
+    "auto-sleep",
+    "bed-breaking"
   ],
   "author": "Your Name",
   "license": "MIT"
