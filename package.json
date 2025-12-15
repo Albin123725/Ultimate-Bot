@@ -1,7 +1,7 @@
 {
   "name": "ultimate-minecraft-bot-system",
-  "version": "2.2.0",
-  "description": "Ultimate Minecraft Bot System with Creative Mode & Auto-Sleep",
+  "version": "2.3.0",
+  "description": "Ultimate Minecraft Bot System with Home System, Building, and Crash Protection",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -22,8 +22,20 @@
     "aternos",
     "render",
     "auto-sleep",
-    "bed-breaking"
+    "home-system",
+    "building",
+    "crash-protection",
+    "minecraft-bot",
+    "automation"
   ],
   "author": "Your Name",
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/ultimate-minecraft-bot-system.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/ultimate-minecraft-bot-system/issues"
+  },
+  "homepage": "https://github.com/yourusername/ultimate-minecraft-bot-system#readme"
 }
