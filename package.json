@@ -1,15 +1,26 @@
 {
-  "name": "ultimate-2bot-creative-system",
-  "version": "1.0.0",
-  "description": "Creative Mode Bot System with Auto-Sleep",
+  "name": "ultimate-minecraft-bot-system",
+  "version": "2.0.0",
+  "description": "Ultimate Minecraft Bot System with Creative Mode & Auto-Sleep",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "echo \"No tests specified\" && exit 0"
   },
   "dependencies": {
     "mineflayer": "^4.15.0"
   },
   "engines": {
-    "node": "18.x"
-  }
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "minecraft",
+    "bot",
+    "creative",
+    "aternos",
+    "render"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
 }
