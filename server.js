@@ -1,6 +1,6 @@
 // ============================================================
-// 🚀 ULTIMATE MINECRAFT BOT SYSTEM v3.0 - SIMPLIFIED
-// 😴 ONE Bed System • Smart Sleep • Basic Activities
+// 🚀 ULTIMATE MINECRAFT BOT SYSTEM v3.1 - AUTO BED REPLACEMENT
+// 😴 ONE Bed System • Auto Replace • Spawnpoint Set
 // ============================================================
 
 const mineflayer = require('mineflayer');
@@ -9,9 +9,9 @@ const Vec3 = require('vec3').Vec3;
 
 console.log(`
 ╔══════════════════════════════════════════════════════════════════════════╗
-║   🚀 ULTIMATE MINECRAFT BOT SYSTEM v3.0                                 ║
-║   😴 ONE Bed System • Smart Sleep • Basic Activities                   ║
-║   🤖 2 Bots • One Home Bed • Simple Sleep                              ║
+║   🚀 ULTIMATE MINECRAFT BOT SYSTEM v3.1                                 ║
+║   😴 ONE Bed System • Auto Replace Broken Bed • Spawnpoint             ║
+║   🤖 2 Bots • Home Bed Replacement • Spawnpoint Protection             ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 `);
 
@@ -34,14 +34,13 @@ class Logger {
       disconnect: '🔌',
       kick: '🚫',
       bed_break: '⛏️',
+      bed_place: '🛏️',
       cleanup: '🧹',
       home: '🏠',
-      travel: '🗺️',
+      spawnpoint: '📍',
       emergency: '🚨',
       occupied_bed: '🚫🛏️',
-      activity: '🎯',
-      retry: '🔁',
-      timeout: '⏱️'
+      activity: '🎯'
     };
   }
 
@@ -110,46 +109,39 @@ const CONFIG = {
   },
   FEATURES: {
     AUTO_SLEEP: true,
-    BED_MANAGEMENT: true,
     CREATIVE_MODE: true,
     AUTO_RECONNECT: true,
     CHAT_SYSTEM: true,
     ACTIVITY_SYSTEM: true,
     HEALTH_MONITORING: true,
-    POSITION_TRACKING: true,
-    TIME_AWARENESS: true,
-    ANTI_AFK: true,
-    ERROR_HANDLING: true,
     HOME_SYSTEM: true,
-    RETURN_TO_HOME: true,
-    EMERGENCY_SLEEP: false, // Disabled for simplicity
     OCCUPIED_BED_HANDLING: true,
     CONNECTION_RETRY: true,
-    ONE_BED_ONLY: true, // NEW: Only place ONE bed
-    CLEAN_EXTRA_BEDS: true // NEW: Clean extra beds in home area
+    ONE_BED_ONLY: true,
+    CLEAN_EXTRA_BEDS: true,
+    AUTO_BED_REPLACEMENT: true, // NEW: Auto replace broken bed
+    SPAWNPOINT_PROTECTION: true // NEW: Always set spawnpoint to home
   },
   SLEEP_SYSTEM: {
-    BREAK_BED_AFTER_SLEEP: false, // Don't break home bed
-    KEEP_HOME_BED: true, // Always keep home bed
-    EMERGENCY_SLEEP_DISTANCE: 10,
+    KEEP_HOME_BED: true,
     STOP_ACTIVITIES_AT_NIGHT: true,
     OCCUPIED_BED_HANDLING: true,
-    MAX_OCCUPIED_RETRIES: 1, // Only try once
-    MIN_BED_DISTANCE: 2,
-    ONE_ALTERNATIVE_BED: true // Place only ONE alternative bed
+    MAX_OCCUPIED_RETRIES: 1,
+    CHECK_BED_INTERVAL: 5000, // NEW: Check bed every 5 seconds
+    BED_REPLACEMENT_DELAY: 2000 // NEW: Delay before replacing bed
   },
   HOME: {
     SET_SPAWN_AS_HOME: true,
-    HOME_RADIUS: 5, // Smaller home radius
+    HOME_RADIUS: 5,
     HOME_RETURN_DISTANCE: 30,
     HOME_BED_POSITION: { x: 0, y: 65, z: 0 },
-    MARK_HOME_WITH_TORCHES: false, // Disabled for simplicity
-    CLEAN_HOME_AREA: true // Clean extra beds in home area
+    CLEAN_HOME_AREA: true,
+    FORCE_SPAWNPOINT: true // NEW: Force spawnpoint to home
   }
 };
 
-// ================= SIMPLE ONE-BED SLEEP SYSTEM =================
-class SimpleSleepSystem {
+// ================= AUTO-BED REPLACEMENT SLEEP SYSTEM =================
+class AutoBedSleepSystem {
   constructor(botInstance, botName) {
     this.bot = botInstance;
     this.botName = botName;
@@ -162,17 +154,367 @@ class SimpleSleepSystem {
       lastSleepTime: null,
       sleepCycles: 0,
       failedSleepAttempts: 0,
-      lastBedBreakTime: null,
-      occupiedBedRetries: 0,
-      isCleaningBeds: false,
-      hasBedInInventory: false
+      bedReplacements: 0,
+      lastBedCheck: 0,
+      isCheckingBed: false,
+      isReplacingBed: false,
+      spawnpointSet: false
     };
     
     this.nightCheckInterval = null;
     this.morningCheckInterval = null;
+    this.bedCheckInterval = null;
+    this.bedReplacementTimeout = null;
   }
 
-  // ================= SIMPLE BED OCCUPATION CHECK =================
+  // ================= INITIALIZE HOME SYSTEM =================
+  async initializeHomeSystem() {
+    try {
+      logger.log('Setting up home system...', 'home', this.botName);
+      
+      // Get spawn position
+      const spawnPos = this.bot.entity.position;
+      const homePosition = {
+        x: Math.floor(spawnPos.x),
+        y: Math.floor(spawnPos.y),
+        z: Math.floor(spawnPos.z)
+      };
+      
+      logger.log(`Home location: ${homePosition.x}, ${homePosition.y}, ${homePosition.z}`, 'home', this.botName);
+      
+      // Get bed from creative
+      await this.getBedFromCreative();
+      
+      // Find and place home bed
+      const bedPlaced = await this.placeHomeBed(homePosition);
+      
+      if (bedPlaced) {
+        // Set spawnpoint
+        await this.setSpawnpoint();
+        
+        // Start bed checking
+        this.startBedChecking();
+        
+        logger.log('✅ Home system initialized!', 'success', this.botName);
+        return true;
+      }
+      
+    } catch (error) {
+      logger.log(`Failed to initialize home: ${error.message}`, 'error', this.botName);
+    }
+    
+    return false;
+  }
+
+  async placeHomeBed(nearPosition) {
+    logger.log('Placing home bed...', 'bed_place', this.botName);
+    
+    // Try positions around the given position
+    const positions = [
+      { x: nearPosition.x, y: nearPosition.y, z: nearPosition.z },
+      { x: nearPosition.x + 1, y: nearPosition.y, z: nearPosition.z },
+      { x: nearPosition.x, y: nearPosition.y, z: nearPosition.z + 1 },
+      { x: nearPosition.x - 1, y: nearPosition.y, z: nearPosition.z },
+      { x: nearPosition.x, y: nearPosition.y, z: nearPosition.z - 1 }
+    ];
+    
+    for (const position of positions) {
+      if (await this.isSuitableForBed(position)) {
+        const placed = await this.placeBed(position);
+        if (placed) {
+          this.state.homeBedPosition = position;
+          this.state.hasHomeBed = true;
+          this.state.bedReplacements++;
+          logger.log(`✅ Home bed placed at ${position.x}, ${position.y}, ${position.z}`, 'success', this.botName);
+          return true;
+        }
+      }
+    }
+    
+    logger.log('❌ Could not place home bed', 'error', this.botName);
+    return false;
+  }
+
+  // ================= BED CHECKING SYSTEM =================
+  startBedChecking() {
+    if (this.bedCheckInterval) {
+      clearInterval(this.bedCheckInterval);
+    }
+    
+    this.bedCheckInterval = setInterval(() => {
+      this.checkHomeBed();
+    }, CONFIG.SLEEP_SYSTEM.CHECK_BED_INTERVAL);
+    
+    logger.log('✅ Bed checking system started', 'success', this.botName);
+  }
+
+  async checkHomeBed() {
+    if (this.state.isCheckingBed || this.state.isReplacingBed || !this.state.hasHomeBed) {
+      return;
+    }
+    
+    this.state.isCheckingBed = true;
+    this.state.lastBedCheck = Date.now();
+    
+    try {
+      const bedPos = new Vec3(
+        this.state.homeBedPosition.x,
+        this.state.homeBedPosition.y,
+        this.state.homeBedPosition.z
+      );
+      
+      const bedBlock = this.bot.blockAt(bedPos);
+      const isBed = bedBlock && this.isBedBlock(bedBlock);
+      
+      if (!isBed) {
+        logger.log('🚨 Home bed is missing!', 'warn', this.botName);
+        await this.replaceHomeBed();
+      } else {
+        // Bed exists, check if spawnpoint is set
+        if (!this.state.spawnpointSet && CONFIG.FEATURES.SPAWNPOINT_PROTECTION) {
+          await this.setSpawnpoint();
+        }
+      }
+      
+    } catch (error) {
+      logger.log(`Bed check error: ${error.message}`, 'debug', this.botName);
+    } finally {
+      this.state.isCheckingBed = false;
+    }
+  }
+
+  async replaceHomeBed() {
+    if (this.state.isReplacingBed || !this.state.hasHomeBed) {
+      return;
+    }
+    
+    this.state.isReplacingBed = true;
+    logger.log('Replacing home bed...', 'bed_place', this.botName);
+    
+    try {
+      // Get bed from creative
+      await this.getBedFromCreative();
+      
+      // Clean the position first
+      await this.clearBedPosition(this.state.homeBedPosition);
+      
+      // Wait a bit
+      await this.delay(CONFIG.SLEEP_SYSTEM.BED_REPLACEMENT_DELAY);
+      
+      // Place new bed at same position
+      const placed = await this.placeBed(this.state.homeBedPosition);
+      
+      if (placed) {
+        this.state.bedReplacements++;
+        
+        // Set spawnpoint again
+        await this.setSpawnpoint();
+        
+        logger.log(`✅ Home bed replaced at ${this.state.homeBedPosition.x}, ${this.state.homeBedPosition.y}, ${this.state.homeBedPosition.z}`, 'success', this.botName);
+        
+        // If it's night and we're not sleeping, try to sleep
+        if (this.isNightTime() && !this.state.isSleeping) {
+          await this.sleep();
+        }
+      } else {
+        logger.log('❌ Failed to replace home bed', 'error', this.botName);
+      }
+      
+    } catch (error) {
+      logger.log(`Bed replacement error: ${error.message}`, 'error', this.botName);
+    } finally {
+      this.state.isReplacingBed = false;
+    }
+  }
+
+  async clearBedPosition(position) {
+    try {
+      const bedPos = new Vec3(position.x, position.y, position.z);
+      const block = this.bot.blockAt(bedPos);
+      
+      if (block && block.name !== 'air') {
+        await this.bot.dig(block);
+        await this.delay(500);
+      }
+    } catch (error) {
+      // Ignore errors
+    }
+  }
+
+  // ================= SPAWNPOINT MANAGEMENT =================
+  async setSpawnpoint() {
+    if (!this.state.hasHomeBed || !this.state.homeBedPosition) {
+      return false;
+    }
+    
+    try {
+      const bedPos = this.state.homeBedPosition;
+      this.bot.chat(`/spawnpoint ${this.bot.username} ${bedPos.x} ${bedPos.y} ${bedPos.z}`);
+      
+      await this.delay(1000);
+      
+      this.state.spawnpointSet = true;
+      logger.log(`📍 Spawnpoint set to ${bedPos.x}, ${bedPos.y}, ${bedPos.z}`, 'spawnpoint', this.botName);
+      
+      return true;
+    } catch (error) {
+      logger.log(`Failed to set spawnpoint: ${error.message}`, 'error', this.botName);
+      return false;
+    }
+  }
+
+  // ================= SLEEP SYSTEM =================
+  async sleep() {
+    if (this.state.isSleeping) {
+      logger.log('Already sleeping', 'sleep', this.botName);
+      return;
+    }
+    
+    logger.log('Attempting to sleep...', 'sleep', this.botName);
+    
+    // First check if home bed exists
+    await this.checkHomeBed();
+    
+    // Try sleeping in home bed
+    if (this.state.hasHomeBed) {
+      const success = await this.sleepInHomeBed();
+      if (success) return;
+    }
+    
+    // Home bed failed or doesn't exist
+    logger.log('Home bed not available, placing alternative bed', 'warn', this.botName);
+    await this.sleepWithAlternativeBed();
+  }
+
+  async sleepInHomeBed() {
+    try {
+      if (!this.state.homeBedPosition) return false;
+      
+      const bedPos = new Vec3(
+        this.state.homeBedPosition.x,
+        this.state.homeBedPosition.y,
+        this.state.homeBedPosition.z
+      );
+      
+      // Check if bed exists
+      const bedBlock = this.bot.blockAt(bedPos);
+      if (!bedBlock || !this.isBedBlock(bedBlock)) {
+        logger.log('Home bed missing', 'warn', this.botName);
+        return false;
+      }
+      
+      // Check if bed is occupied
+      if (this.isBedOccupied(this.state.homeBedPosition)) {
+        logger.log('Home bed is occupied', 'occupied_bed', this.botName);
+        return false;
+      }
+      
+      // Walk to bed if needed
+      const distance = this.bot.entity.position.distanceTo(bedPos);
+      if (distance > 2) {
+        await this.bot.lookAt(bedPos);
+        this.bot.setControlState('forward', true);
+        await this.delay(Math.min(distance * 200, 1000));
+        this.bot.setControlState('forward', false);
+        await this.delay(500);
+      }
+      
+      // Sleep in bed
+      await this.bot.sleep(bedBlock);
+      this.state.isSleeping = true;
+      this.state.lastSleepTime = Date.now();
+      this.state.sleepCycles++;
+      this.state.failedSleepAttempts = 0;
+      
+      logger.log(`😴 Sleeping in home bed`, 'sleep', this.botName);
+      return true;
+      
+    } catch (error) {
+      logger.log(`Failed to sleep in home bed: ${error.message}`, 'error', this.botName);
+      this.state.failedSleepAttempts++;
+      return false;
+    }
+  }
+
+  async sleepWithAlternativeBed() {
+    try {
+      // Clean any extra beds first
+      await this.cleanExtraBeds();
+      
+      // Get bed if needed
+      await this.getBedFromCreative();
+      
+      // Find position for alternative bed (away from home bed)
+      const altPosition = await this.findAlternativeBedPosition();
+      if (!altPosition) {
+        logger.log('Could not find position for alternative bed', 'error', this.botName);
+        return;
+      }
+      
+      // Place alternative bed
+      const placed = await this.placeBed(altPosition);
+      if (!placed) {
+        logger.log('Failed to place alternative bed', 'error', this.botName);
+        return;
+      }
+      
+      this.state.alternativeBedPlaced = true;
+      this.state.alternativeBedPosition = altPosition;
+      
+      logger.log(`Alternative bed placed at ${altPosition.x}, ${altPosition.y}, ${altPosition.z}`, 'bed_place', this.botName);
+      
+      // Sleep in alternative bed
+      const bedPos = new Vec3(altPosition.x, altPosition.y, altPosition.z);
+      const bedBlock = this.bot.blockAt(bedPos);
+      
+      if (bedBlock) {
+        await this.bot.sleep(bedBlock);
+        this.state.isSleeping = true;
+        this.state.lastSleepTime = Date.now();
+        this.state.sleepCycles++;
+        this.state.failedSleepAttempts = 0;
+        
+        logger.log(`😴 Sleeping in alternative bed`, 'sleep', this.botName);
+      }
+      
+    } catch (error) {
+      logger.log(`Failed to sleep with alternative bed: ${error.message}`, 'error', this.botName);
+      this.state.failedSleepAttempts++;
+    }
+  }
+
+  async wakeUp() {
+    if (!this.state.isSleeping) return;
+    
+    try {
+      if (this.bot.isSleeping) {
+        this.bot.wake();
+      }
+      
+      this.state.isSleeping = false;
+      logger.log('Woke up', 'wake', this.botName);
+      
+      await this.delay(1000);
+      
+      // Clean alternative bed if it was placed
+      if (this.state.alternativeBedPlaced && this.state.alternativeBedPosition) {
+        await this.breakBed(this.state.alternativeBedPosition);
+        this.state.alternativeBedPlaced = false;
+        this.state.alternativeBedPosition = null;
+      }
+      
+      // Clean any other extra beds
+      await this.cleanExtraBeds();
+      
+      // Check home bed
+      await this.checkHomeBed();
+      
+    } catch (error) {
+      logger.log(`Wake up error: ${error.message}`, 'error', this.botName);
+    }
+  }
+
+  // ================= HELPER METHODS =================
   isBedOccupied(bedPosition) {
     try {
       if (!this.bot.players || !bedPosition) return false;
@@ -187,12 +529,10 @@ class SimpleSleepSystem {
           
           if (distance < 2) {
             if (player.entity.isSleeping !== undefined && player.entity.isSleeping) {
-              logger.log(`Bed at ${bedPosition.x},${bedPosition.y},${bedPosition.z} is occupied by ${player.username}`, 'occupied_bed', this.botName);
               return true;
             }
             
             if (distance < 1.5) {
-              logger.log(`Player ${player.username} is near bed`, 'info', this.botName);
               return true;
             }
           }
@@ -201,102 +541,104 @@ class SimpleSleepSystem {
       
       return false;
     } catch (error) {
-      logger.log(`Bed check error: ${error.message}`, 'debug', this.botName);
       return false;
     }
   }
 
-  // ================= SET HOME BED (ONLY ONE) =================
-  async setHomeBed() {
-    if (this.state.hasHomeBed) {
-      logger.log('Home bed already set', 'home', this.botName);
-      return true;
-    }
+  async findAlternativeBedPosition() {
+    const basePos = this.state.hasHomeBed ? this.state.homeBedPosition : this.bot.entity.position;
     
-    try {
-      // Get spawn position
-      const spawnPos = this.bot.entity.position;
-      const homePosition = {
-        x: Math.floor(spawnPos.x),
-        y: Math.floor(spawnPos.y),
-        z: Math.floor(spawnPos.z)
-      };
-      
-      logger.log(`Setting home bed at ${homePosition.x}, ${homePosition.y}, ${homePosition.z}`, 'home', this.botName);
-      
-      // Get bed from creative
-      await this.getBedFromCreative();
-      
-      // Find suitable position near spawn
-      const bedPos = await this.findSuitableBedPosition(homePosition);
-      
-      if (!bedPos) {
-        logger.log('Could not find position for home bed', 'warn', this.botName);
-        return false;
-      }
-      
-      // Place the bed
-      const placed = await this.placeBed(bedPos);
-      if (!placed) {
-        logger.log('Failed to place home bed', 'error', this.botName);
-        return false;
-      }
-      
-      this.state.homeBedPosition = bedPos;
-      this.state.hasHomeBed = true;
-      this.state.hasBedInInventory = false;
-      
-      // Set spawn point
-      this.bot.chat(`/spawnpoint ${this.bot.username} ${bedPos.x} ${bedPos.y} ${bedPos.z}`);
-      logger.log(`Home bed placed and spawn point set!`, 'success', this.botName);
-      
-      return true;
-      
-    } catch (error) {
-      logger.log(`Failed to set home bed: ${error.message}`, 'error', this.botName);
-      return false;
-    }
-  }
-
-  // ================= FIND SUITABLE BED POSITION =================
-  async findSuitableBedPosition(nearPosition) {
-    // Try positions around the given position
-    const positions = [
-      { x: nearPosition.x, y: nearPosition.y, z: nearPosition.z },
-      { x: nearPosition.x + 1, y: nearPosition.y, z: nearPosition.z },
-      { x: nearPosition.x, y: nearPosition.y, z: nearPosition.z + 1 },
-      { x: nearPosition.x - 1, y: nearPosition.y, z: nearPosition.z },
-      { x: nearPosition.x, y: nearPosition.y, z: nearPosition.z - 1 }
-    ];
-    
-    for (const position of positions) {
-      if (await this.isSuitableForBed(position)) {
-        return position;
+    // Try positions in a small radius (avoid home bed position)
+    for (let radius = 2; radius <= 4; radius++) {
+      for (let x = -radius; x <= radius; x++) {
+        for (let z = -radius; z <= radius; z++) {
+          if (x === 0 && z === 0) continue;
+          
+          const checkPos = {
+            x: Math.floor(basePos.x) + x,
+            y: Math.floor(basePos.y),
+            z: Math.floor(basePos.z) + z
+          };
+          
+          // Skip if this is home bed position
+          if (this.state.hasHomeBed &&
+              checkPos.x === this.state.homeBedPosition.x &&
+              checkPos.z === this.state.homeBedPosition.z) {
+            continue;
+          }
+          
+          if (await this.isSuitableForBed(checkPos)) {
+            return checkPos;
+          }
+        }
       }
     }
     
     return null;
   }
 
-  async isSuitableForBed(position) {
-    const blockPos = new Vec3(position.x, position.y, position.z);
-    const blockBelowPos = new Vec3(position.x, position.y - 1, position.z);
+  async cleanExtraBeds() {
+    if (!CONFIG.FEATURES.CLEAN_EXTRA_BEDS) return;
     
-    const block = this.bot.blockAt(blockPos);
-    const blockBelow = this.bot.blockAt(blockBelowPos);
-    
-    // Check if position is suitable for bed
-    if (!block || block.name !== 'air') return false;
-    if (!blockBelow || blockBelow.name === 'air' || 
-        blockBelow.name === 'lava' || blockBelow.name === 'water') {
-      return false;
+    try {
+      const homePos = this.state.hasHomeBed ? this.state.homeBedPosition : this.bot.entity.position;
+      
+      // Find all beds in home radius
+      const beds = this.bot.findBlocks({
+        matching: block => {
+          if (!block) return false;
+          const name = this.bot.registry.blocks[block.type]?.name;
+          return name && name.includes('bed');
+        },
+        maxDistance: CONFIG.HOME.HOME_RADIUS,
+        count: 20
+      });
+      
+      if (beds && beds.length > 0) {
+        for (const bedPos of beds) {
+          const position = { x: bedPos.x, y: bedPos.y, z: bedPos.z };
+          
+          // Skip home bed
+          if (this.state.hasHomeBed &&
+              position.x === this.state.homeBedPosition.x &&
+              position.y === this.state.homeBedPosition.y &&
+              position.z === this.state.homeBedPosition.z) {
+            continue;
+          }
+          
+          // Skip alternative bed if we're using it
+          if (this.state.alternativeBedPlaced &&
+              position.x === this.state.alternativeBedPosition.x &&
+              position.y === this.state.alternativeBedPosition.y &&
+              position.z === this.state.alternativeBedPosition.z) {
+            continue;
+          }
+          
+          // Break the bed
+          await this.breakBed(position);
+          await this.delay(300);
+        }
+      }
+      
+    } catch (error) {
+      // Ignore errors
     }
-    
-    const blockAbovePos = new Vec3(position.x, position.y + 1, position.z);
-    const blockAbove = this.bot.blockAt(blockAbovePos);
-    if (!blockAbove || blockAbove.name !== 'air') return false;
-    
-    return true;
+  }
+
+  async breakBed(position) {
+    try {
+      const bedPos = new Vec3(position.x, position.y, position.z);
+      const bedBlock = this.bot.blockAt(bedPos);
+      
+      if (bedBlock && this.isBedBlock(bedBlock)) {
+        await this.bot.dig(bedBlock);
+        await this.delay(500);
+        return true;
+      }
+    } catch (error) {
+      // Ignore errors
+    }
+    return false;
   }
 
   async placeBed(position) {
@@ -325,7 +667,6 @@ class SimpleSleepSystem {
     try {
       this.bot.chat(`/give ${this.bot.username} bed 1`);
       await this.delay(2000);
-      this.state.hasBedInInventory = true;
       return true;
     } catch (error) {
       logger.log(`Failed to get bed: ${error.message}`, 'error', this.botName);
@@ -333,260 +674,39 @@ class SimpleSleepSystem {
     }
   }
 
-  // ================= SIMPLE SLEEP LOGIC =================
-  async sleep() {
-    if (this.state.isSleeping) {
-      logger.log('Already sleeping', 'sleep', this.botName);
-      return;
-    }
+  async isSuitableForBed(position) {
+    const blockPos = new Vec3(position.x, position.y, position.z);
+    const blockBelowPos = new Vec3(position.x, position.y - 1, position.z);
     
-    logger.log('Attempting to sleep...', 'sleep', this.botName);
+    const block = this.bot.blockAt(blockPos);
+    const blockBelow = this.bot.blockAt(blockBelowPos);
     
-    // Try sleeping in home bed first
-    if (this.state.hasHomeBed) {
-      const success = await this.sleepInHomeBed();
-      if (success) return;
-    }
-    
-    // Home bed failed or doesn't exist
-    logger.log('Home bed not available, placing alternative bed', 'warn', this.botName);
-    await this.sleepWithAlternativeBed();
-  }
-
-  async sleepInHomeBed() {
-    try {
-      if (!this.state.homeBedPosition) return false;
-      
-      const bedPos = new Vec3(
-        this.state.homeBedPosition.x,
-        this.state.homeBedPosition.y,
-        this.state.homeBedPosition.z
-      );
-      
-      // Check if bed is occupied
-      if (this.isBedOccupied(this.state.homeBedPosition)) {
-        logger.log('Home bed is occupied', 'occupied_bed', this.botName);
-        return false;
-      }
-      
-      const bedBlock = this.bot.blockAt(bedPos);
-      if (!bedBlock || !this.isBedBlock(bedBlock)) {
-        logger.log('Home bed missing', 'warn', this.botName);
-        return false;
-      }
-      
-      // Walk to bed if needed
-      const distance = this.bot.entity.position.distanceTo(bedPos);
-      if (distance > 2) {
-        await this.bot.lookAt(bedPos);
-        this.bot.setControlState('forward', true);
-        await this.delay(Math.min(distance * 200, 1000));
-        this.bot.setControlState('forward', false);
-        await this.delay(500);
-      }
-      
-      // Sleep in bed
-      await this.bot.sleep(bedBlock);
-      this.state.isSleeping = true;
-      this.state.lastSleepTime = Date.now();
-      this.state.sleepCycles++;
-      this.state.failedSleepAttempts = 0;
-      
-      logger.log(`Sleeping in home bed`, 'sleep', this.botName);
-      return true;
-      
-    } catch (error) {
-      logger.log(`Failed to sleep in home bed: ${error.message}`, 'error', this.botName);
-      this.state.failedSleepAttempts++;
+    if (!block || block.name !== 'air') return false;
+    if (!blockBelow || blockBelow.name === 'air' || 
+        blockBelow.name === 'lava' || blockBelow.name === 'water') {
       return false;
     }
-  }
-
-  async sleepWithAlternativeBed() {
-    try {
-      // Clean any extra beds first
-      await this.cleanExtraBeds();
-      
-      // Get bed if needed
-      if (!this.state.hasBedInInventory) {
-        await this.getBedFromCreative();
-      }
-      
-      // Find position for alternative bed
-      const altPosition = await this.findAlternativeBedPosition();
-      if (!altPosition) {
-        logger.log('Could not find position for alternative bed', 'error', this.botName);
-        return;
-      }
-      
-      // Place alternative bed
-      const placed = await this.placeBed(altPosition);
-      if (!placed) {
-        logger.log('Failed to place alternative bed', 'error', this.botName);
-        return;
-      }
-      
-      this.state.alternativeBedPlaced = true;
-      this.state.alternativeBedPosition = altPosition;
-      this.state.hasBedInInventory = false;
-      
-      logger.log(`Alternative bed placed at ${altPosition.x}, ${altPosition.y}, ${altPosition.z}`, 'success', this.botName);
-      
-      // Sleep in alternative bed
-      const bedPos = new Vec3(altPosition.x, altPosition.y, altPosition.z);
-      const bedBlock = this.bot.blockAt(bedPos);
-      
-      if (bedBlock) {
-        await this.bot.sleep(bedBlock);
-        this.state.isSleeping = true;
-        this.state.lastSleepTime = Date.now();
-        this.state.sleepCycles++;
-        this.state.failedSleepAttempts = 0;
-        
-        logger.log(`Sleeping in alternative bed`, 'sleep', this.botName);
-      }
-      
-    } catch (error) {
-      logger.log(`Failed to sleep with alternative bed: ${error.message}`, 'error', this.botName);
-      this.state.failedSleepAttempts++;
-    }
-  }
-
-  async findAlternativeBedPosition() {
-    const basePos = this.state.hasHomeBed ? this.state.homeBedPosition : this.bot.entity.position;
     
-    // Try positions in a small radius
-    for (let radius = 1; radius <= 3; radius++) {
-      for (let x = -radius; x <= radius; x++) {
-        for (let z = -radius; z <= radius; z++) {
-          if (x === 0 && z === 0) continue; // Skip center
-          
-          const checkPos = {
-            x: Math.floor(basePos.x) + x,
-            y: Math.floor(basePos.y),
-            z: Math.floor(basePos.z) + z
-          };
-          
-          // Skip if this is home bed position
-          if (this.state.hasHomeBed &&
-              checkPos.x === this.state.homeBedPosition.x &&
-              checkPos.z === this.state.homeBedPosition.z) {
-            continue;
-          }
-          
-          if (await this.isSuitableForBed(checkPos)) {
-            return checkPos;
-          }
-        }
-      }
-    }
+    const blockAbovePos = new Vec3(position.x, position.y + 1, position.z);
+    const blockAbove = this.bot.blockAt(blockAbovePos);
+    if (!blockAbove || blockAbove.name !== 'air') return false;
     
-    return null;
+    return true;
   }
 
-  // ================= CLEAN EXTRA BEDS =================
-  async cleanExtraBeds() {
-    if (this.state.isCleaningBeds || !CONFIG.FEATURES.CLEAN_EXTRA_BEDS) return;
-    
-    this.state.isCleaningBeds = true;
-    logger.log('Cleaning extra beds in home area...', 'cleanup', this.botName);
-    
-    try {
-      const homePos = this.state.hasHomeBed ? this.state.homeBedPosition : this.bot.entity.position;
-      
-      // Find all beds in home radius
-      const beds = this.bot.findBlocks({
-        matching: block => {
-          if (!block) return false;
-          const name = this.bot.registry.blocks[block.type]?.name;
-          return name && name.includes('bed');
-        },
-        maxDistance: CONFIG.HOME.HOME_RADIUS,
-        count: 20
-      });
-      
-      if (beds && beds.length > 0) {
-        logger.log(`Found ${beds.length} beds in home area`, 'cleanup', this.botName);
-        
-        for (const bedPos of beds) {
-          const position = { x: bedPos.x, y: bedPos.y, z: bedPos.z };
-          
-          // Skip home bed
-          if (this.state.hasHomeBed &&
-              position.x === this.state.homeBedPosition.x &&
-              position.y === this.state.homeBedPosition.y &&
-              position.z === this.state.homeBedPosition.z) {
-            continue;
-          }
-          
-          // Skip alternative bed if we're using it
-          if (this.state.alternativeBedPlaced &&
-              position.x === this.state.alternativeBedPosition.x &&
-              position.y === this.state.alternativeBedPosition.y &&
-              position.z === this.state.alternativeBedPosition.z) {
-            continue;
-          }
-          
-          // Break the bed
-          await this.breakBed(position);
-          await this.delay(500);
-        }
-      }
-      
-    } catch (error) {
-      logger.log(`Error cleaning beds: ${error.message}`, 'error', this.botName);
-    } finally {
-      this.state.isCleaningBeds = false;
-    }
+  isBedBlock(block) {
+    if (!block) return false;
+    const name = this.bot.registry.blocks[block.type]?.name;
+    return name && name.includes('bed');
   }
 
-  async breakBed(position) {
-    try {
-      const bedPos = new Vec3(position.x, position.y, position.z);
-      const bedBlock = this.bot.blockAt(bedPos);
-      
-      if (bedBlock && this.isBedBlock(bedBlock)) {
-        await this.bot.dig(bedBlock);
-        await this.delay(1000);
-        logger.log(`Broke extra bed at ${position.x}, ${position.y}, ${position.z}`, 'bed_break', this.botName);
-        return true;
-      }
-    } catch (error) {
-      logger.log(`Failed to break bed: ${error.message}`, 'debug', this.botName);
-    }
-    return false;
+  isNightTime() {
+    if (!this.bot || !this.bot.time) return false;
+    const time = this.bot.time.time;
+    return time >= 13000 && time <= 23000;
   }
 
-  // ================= WAKE UP AND CLEAN =================
-  async wakeUp() {
-    if (!this.state.isSleeping) return;
-    
-    try {
-      if (this.bot.isSleeping) {
-        this.bot.wake();
-      }
-      
-      this.state.isSleeping = false;
-      logger.log('Woke up', 'wake', this.botName);
-      
-      await this.delay(1000);
-      
-      // Clean alternative bed if it was placed
-      if (this.state.alternativeBedPlaced && this.state.alternativeBedPosition) {
-        await this.breakBed(this.state.alternativeBedPosition);
-        this.state.alternativeBedPlaced = false;
-        this.state.alternativeBedPosition = null;
-      }
-      
-      // Clean any other extra beds
-      await this.cleanExtraBeds();
-      
-    } catch (error) {
-      logger.log(`Wake up error: ${error.message}`, 'error', this.botName);
-    }
-  }
-
-  // ================= TIME CHECKING =================
+  // ================= TIME MONITORING =================
   startTimeMonitoring() {
     if (this.nightCheckInterval) {
       clearInterval(this.nightCheckInterval);
@@ -600,22 +720,16 @@ class SimpleSleepSystem {
       const isMorning = time >= 0 && time < 13000;
       
       if (isNight && !this.state.isSleeping) {
-        logger.log('Night detected - Going to sleep', 'night', this.botName);
+        logger.log('🌙 Night detected - Going to sleep', 'night', this.botName);
         this.sleep();
       }
       
       if (isMorning && this.state.isSleeping) {
-        logger.log('Morning detected - Waking up', 'day', this.botName);
+        logger.log('☀️ Morning detected - Waking up', 'day', this.botName);
         this.wakeUp();
       }
       
     }, 5000);
-  }
-
-  isBedBlock(block) {
-    if (!block) return false;
-    const name = this.bot.registry.blocks[block.type]?.name;
-    return name && name.includes('bed');
   }
 
   async delay(ms) {
@@ -629,10 +743,11 @@ class SimpleSleepSystem {
       homeBedPosition: this.state.homeBedPosition,
       alternativeBedPlaced: this.state.alternativeBedPlaced,
       sleepCycles: this.state.sleepCycles,
+      bedReplacements: this.state.bedReplacements,
+      spawnpointSet: this.state.spawnpointSet,
       lastSleepTime: this.state.lastSleepTime ? 
         new Date(this.state.lastSleepTime).toLocaleTimeString() : 'Never',
-      failedSleepAttempts: this.state.failedSleepAttempts,
-      occupiedBedRetries: this.state.occupiedBedRetries
+      failedSleepAttempts: this.state.failedSleepAttempts
     };
   }
 }
@@ -664,7 +779,8 @@ class SimpleBot {
         blocksBroken: 0,
         distanceTraveled: 0,
         sleepCycles: 0,
-        connectionAttempts: 0
+        connectionAttempts: 0,
+        bedReplacements: 0
       }
     };
     
@@ -697,7 +813,7 @@ class SimpleBot {
         connectTimeout: CONFIG.CONNECTION.CONNECT_TIMEOUT
       });
       
-      this.sleepSystem = new SimpleSleepSystem(this.bot, this.state.username);
+      this.sleepSystem = new AutoBedSleepSystem(this.bot, this.state.username);
       
       this.setupEventHandlers();
       
@@ -825,9 +941,10 @@ class SimpleBot {
 
   async initializeHomeSystem() {
     if (CONFIG.FEATURES.HOME_SYSTEM) {
-      const success = await this.sleepSystem.setHomeBed();
+      const success = await this.sleepSystem.initializeHomeSystem();
       if (success && this.sleepSystem.state.homeBedPosition) {
         this.state.homeLocation = this.sleepSystem.state.homeBedPosition;
+        this.state.metrics.bedReplacements = this.sleepSystem.state.bedReplacements;
       }
     }
   }
@@ -918,7 +1035,7 @@ class SimpleBot {
   }
 
   simpleBlockActivity() {
-    if (Math.random() < 0.3) { // 30% chance to do block activity
+    if (Math.random() < 0.3) {
       const pos = this.bot.entity.position;
       const blockPos = {
         x: Math.floor(pos.x) + Math.floor(Math.random() * 3) - 1,
@@ -1042,10 +1159,12 @@ class SimpleBot {
         messages: this.state.metrics.messagesSent,
         blocksPlaced: this.state.metrics.blocksPlaced,
         blocksBroken: this.state.metrics.blocksBroken,
-        sleepCycles: sleepStatus.sleepCycles || 0
+        sleepCycles: sleepStatus.sleepCycles || 0,
+        bedReplacements: sleepStatus.bedReplacements || 0
       },
       sleepInfo: {
         hasHomeBed: sleepStatus.hasHomeBed || false,
+        spawnpointSet: sleepStatus.spawnpointSet || false,
         alternativeBedPlaced: sleepStatus.alternativeBedPlaced || false,
         failedAttempts: sleepStatus.failedSleepAttempts || 0
       }
@@ -1063,11 +1182,11 @@ class SimpleBotManager {
   
   async start() {
     logger.log(`\n${'='.repeat(70)}`, 'info', 'SYSTEM');
-    logger.log('🚀 SIMPLE BOT SYSTEM v3.0 - ONE BED ONLY', 'info', 'SYSTEM');
+    logger.log('🚀 AUTO BED REPLACEMENT SYSTEM v3.1', 'info', 'SYSTEM');
     logger.log(`${'='.repeat(70)}`, 'info', 'SYSTEM');
     logger.log(`Server: ${CONFIG.SERVER.host}:${CONFIG.SERVER.port}`, 'info', 'SYSTEM');
     logger.log(`Bots: ${CONFIG.BOTS.map(b => b.name).join(', ')}`, 'info', 'SYSTEM');
-    logger.log(`Features: ONE Bed • Simple Sleep • Clean Home Area`, 'info', 'SYSTEM');
+    logger.log(`Features: ONE Bed • Auto Replace • Spawnpoint Protection`, 'info', 'SYSTEM');
     logger.log(`${'='.repeat(70)}\n`, 'info', 'SYSTEM');
     
     this.isRunning = true;
@@ -1094,12 +1213,15 @@ class SimpleBotManager {
     logger.log(`📊 Status updates every ${CONFIG.SYSTEM.STATUS_INTERVAL / 1000} seconds`, 'info', 'SYSTEM');
     logger.log(`🌐 Web interface on port ${CONFIG.SYSTEM.PORT}\n`, 'info', 'SYSTEM');
     
-    logger.log(`🎯 SIMPLE ROUTINE:`, 'info', 'SYSTEM');
-    logger.log(`   1. ☀️ DAY: Basic activities near home`, 'day', 'SYSTEM');
-    logger.log(`   2. 🌙 NIGHT: Sleep in ONE home bed`, 'night', 'SYSTEM');
-    logger.log(`   3. 🚫 BED OCCUPIED: Place ONE alternative bed`, 'occupied_bed', 'SYSTEM');
-    logger.log(`   4. ☀️ MORNING: Clean extra beds, keep home bed`, 'cleanup', 'SYSTEM');
-    logger.log(`   5. 🔁 REPEAT: Simple cycle`, 'success', 'SYSTEM');
+    logger.log(`🎯 AUTO BED PROTECTION:`, 'info', 'SYSTEM');
+    logger.log(`   🛏️  ONE home bed placed at spawn`, 'bed_place', 'SYSTEM');
+    logger.log(`   📍 Spawnpoint automatically set to bed location`, 'spawnpoint', 'SYSTEM');
+    logger.log(`   🔍 Bed checked every 5 seconds`, 'info', 'SYSTEM');
+    logger.log(`   🚨 If bed broken: Auto replaced immediately`, 'bed_place', 'SYSTEM');
+    logger.log(`   🌙 Night: Sleep in home bed`, 'night', 'SYSTEM');
+    logger.log(`   🚫 Bed occupied: ONE alternative bed placed`, 'occupied_bed', 'SYSTEM');
+    logger.log(`   ☀️ Morning: Clean extra beds, keep home bed`, 'cleanup', 'SYSTEM');
+    logger.log(`   🔁 Cycle continues...`, 'success', 'SYSTEM');
   }
   
   startStatusMonitoring() {
@@ -1118,24 +1240,31 @@ class SimpleBotManager {
     const hasHomeBed = connectedBots
       .filter(bot => bot.state.homeLocation).length;
     
+    const totalBedReplacements = connectedBots
+      .reduce((total, bot) => total + (bot.state.metrics.bedReplacements || 0), 0);
+    
     logger.log(`\n${'='.repeat(70)}`, 'info', 'STATUS');
-    logger.log(`📊 SIMPLE STATUS - ${new Date().toLocaleTimeString()}`, 'info', 'STATUS');
+    logger.log(`📊 AUTO BED STATUS - ${new Date().toLocaleTimeString()}`, 'info', 'STATUS');
     logger.log(`${'='.repeat(70)}`, 'info', 'STATUS');
     logger.log(`Connected: ${connectedBots.length}/${this.bots.size}`, 'info', 'STATUS');
     logger.log(`Sleeping: ${sleepingBots.length}`, 'info', 'STATUS');
     logger.log(`With Home Bed: ${hasHomeBed}`, 'info', 'STATUS');
-    logger.log(`ONE Bed System: ✅ ACTIVE`, 'info', 'STATUS');
-    logger.log(`Clean Extra Beds: ${CONFIG.FEATURES.CLEAN_EXTRA_BEDS ? '✅ ACTIVE' : '❌ INACTIVE'}`, 'info', 'STATUS');
+    logger.log(`Bed Replacements: ${totalBedReplacements}`, 'info', 'STATUS');
+    logger.log(`Auto Bed Replacement: ✅ ACTIVE`, 'info', 'STATUS');
+    logger.log(`Spawnpoint Protection: ✅ ACTIVE`, 'info', 'STATUS');
     logger.log(`${'='.repeat(70)}`, 'info', 'STATUS');
     
     connectedBots.forEach(bot => {
       const status = bot.getStatus();
       const sleepIcon = status.isSleeping ? '💤' : '☀️';
+      const bedIcon = status.sleepInfo?.hasHomeBed ? '🛏️' : '❌';
+      const spawnIcon = status.sleepInfo?.spawnpointSet ? '📍' : '❌';
       
       logger.log(`${sleepIcon} ${status.username} (${status.personality})`, 'info', 'STATUS');
-      logger.log(`  Activity: ${status.activity} | Position: ${status.position ? `${status.position.x}, ${status.position.y}, ${status.position.z}` : 'Unknown'}`, 'info', 'STATUS');
+      logger.log(`  Activity: ${status.activity} | Health: ${status.health}/20`, 'info', 'STATUS');
       logger.log(`  Home: ${status.homeLocation ? `${status.homeLocation.x}, ${status.homeLocation.y}, ${status.homeLocation.z}` : 'Not set'}`, 'info', 'STATUS');
-      logger.log(`  Sleep Cycles: ${status.metrics.sleepCycles} | Health: ${status.health}/20`, 'info', 'STATUS');
+      logger.log(`  Bed: ${bedIcon} ${status.sleepInfo?.hasHomeBed ? 'OK' : 'Missing'} | Spawn: ${spawnIcon} ${status.sleepInfo?.spawnpointSet ? 'Set' : 'Not set'}`, 'info', 'STATUS');
+      logger.log(`  Sleep Cycles: ${status.metrics.sleepCycles} | Bed Replacements: ${status.metrics.bedReplacements}`, 'info', 'STATUS');
       logger.log(``, 'info', 'STATUS');
     });
     
@@ -1155,7 +1284,7 @@ class SimpleBotManager {
   }
   
   async stop() {
-    logger.log('\n🛑 Stopping simple bot system...', 'info', 'SYSTEM');
+    logger.log('\n🛑 Stopping system...', 'info', 'SYSTEM');
     this.isRunning = false;
     
     if (this.statusInterval) clearInterval(this.statusInterval);
@@ -1175,7 +1304,7 @@ class SimpleBotManager {
   }
 }
 
-// ================= SIMPLE WEB SERVER =================
+// ================= WEB SERVER =================
 function createWebServer(botManager) {
   const server = http.createServer((req, res) => {
     const url = req.url.split('?')[0];
@@ -1186,6 +1315,7 @@ function createWebServer(botManager) {
       const sleeping = Object.values(statuses).filter(s => s.isSleeping).length;
       const hasHomeBed = Object.values(statuses).filter(s => s.homeLocation).length;
       const totalSleepCycles = Object.values(statuses).reduce((total, s) => total + (s.metrics.sleepCycles || 0), 0);
+      const totalBedReplacements = Object.values(statuses).reduce((total, s) => total + (s.metrics.bedReplacements || 0), 0);
       
       res.writeHead(200, { 
         'Content-Type': 'text/html',
@@ -1198,7 +1328,7 @@ function createWebServer(botManager) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple Minecraft Bot System v3.0</title>
+    <title>Auto Bed Replacement System v3.1</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
@@ -1215,6 +1345,7 @@ function createWebServer(botManager) {
             padding: 20px;
             margin-bottom: 20px;
             text-align: center;
+            border: 1px solid rgba(0, 255, 136, 0.3);
         }
         h1 {
             font-size: 2rem;
@@ -1246,6 +1377,10 @@ function createWebServer(botManager) {
             color: #00ff88;
             margin: 5px 0;
         }
+        .stat-label {
+            font-size: 0.9rem;
+            color: #aaa;
+        }
         
         .bots-grid {
             display: grid;
@@ -1258,11 +1393,24 @@ function createWebServer(botManager) {
             border-radius: 10px;
             padding: 15px;
             border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s;
         }
         .bot-card.sleeping {
             border-color: #00ccff;
             box-shadow: 0 0 10px rgba(0, 204, 255, 0.3);
         }
+        .bot-card.bed-missing {
+            border-color: #ff3333;
+            box-shadow: 0 0 10px rgba(255, 51, 51, 0.3);
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { box-shadow: 0 0 10px rgba(255, 51, 51, 0.3); }
+            50% { box-shadow: 0 0 15px rgba(255, 51, 51, 0.5); }
+            100% { box-shadow: 0 0 10px rgba(255, 51, 51, 0.3); }
+        }
+        
         .bot-header {
             display: flex;
             justify-content: space-between;
@@ -1280,6 +1428,7 @@ function createWebServer(botManager) {
         }
         .connected { background: rgba(0, 255, 136, 0.2); color: #00ff88; }
         .sleeping { background: rgba(0, 204, 255, 0.2); color: #00ccff; }
+        .warning { background: rgba(255, 170, 0, 0.2); color: #ffaa00; }
         
         .info-grid {
             display: grid;
@@ -1309,6 +1458,15 @@ function createWebServer(botManager) {
             border: 1px solid rgba(0, 255, 136, 0.3);
         }
         
+        .bed-status {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 0.9rem;
+        }
+        .bed-ok { background: rgba(0, 255, 136, 0.1); border: 1px solid rgba(0, 255, 136, 0.3); }
+        .bed-missing { background: rgba(255, 51, 51, 0.1); border: 1px solid rgba(255, 51, 51, 0.3); }
+        
         .features {
             margin-top: 30px;
             padding: 20px;
@@ -1327,6 +1485,7 @@ function createWebServer(botManager) {
             border-radius: 5px;
             text-align: center;
             font-size: 0.9rem;
+            border: 1px solid rgba(0, 255, 136, 0.3);
         }
         
         .footer {
@@ -1340,37 +1499,42 @@ function createWebServer(botManager) {
 <body>
     <div class="container">
         <div class="header">
-            <h1>🚀 Simple Minecraft Bot System <span class="version">v3.0</span></h1>
-            <p>ONE Bed System • Simple Sleep • Clean Home Area</p>
+            <h1>🛏️ Auto Bed Replacement System <span class="version">v3.1</span></h1>
+            <p>ONE Bed • Auto Replace Broken • Spawnpoint Protection</p>
             
             <div class="stats">
                 <div class="stat-card">
-                    <div>Connected Bots</div>
+                    <div class="stat-label">Connected Bots</div>
                     <div class="stat-value">${connected}</div>
                 </div>
                 <div class="stat-card">
-                    <div>Sleeping</div>
+                    <div class="stat-label">Sleeping</div>
                     <div class="stat-value">${sleeping}</div>
                 </div>
                 <div class="stat-card">
-                    <div>With Home Bed</div>
+                    <div class="stat-label">With Home Bed</div>
                     <div class="stat-value">${hasHomeBed}</div>
                 </div>
                 <div class="stat-card">
-                    <div>Sleep Cycles</div>
-                    <div class="stat-value">${totalSleepCycles}</div>
+                    <div class="stat-label">Bed Replacements</div>
+                    <div class="stat-value">${totalBedReplacements}</div>
                 </div>
             </div>
         </div>
         
         <h2 style="margin-bottom: 15px;">🤖 Bot Status</h2>
         <div class="bots-grid">
-            ${Object.entries(statuses).map(([id, status]) => `
-            <div class="bot-card ${status.isSleeping ? 'sleeping' : ''}">
+            ${Object.entries(statuses).map(([id, status]) => {
+              const hasBed = status.sleepInfo?.hasHomeBed || false;
+              const spawnpointSet = status.sleepInfo?.spawnpointSet || false;
+              const bedStatus = hasBed ? 'OK' : 'MISSING';
+              
+              return `
+            <div class="bot-card ${status.isSleeping ? 'sleeping' : !hasBed ? 'bed-missing' : ''}">
                 <div class="bot-header">
                     <div class="bot-name">${status.username}</div>
-                    <div class="bot-status ${status.isSleeping ? 'sleeping' : 'connected'}">
-                        ${status.isSleeping ? '💤 SLEEPING' : '☀️ AWAKE'}
+                    <div class="bot-status ${status.isSleeping ? 'sleeping' : !hasBed ? 'warning' : 'connected'}">
+                        ${status.isSleeping ? '💤 SLEEPING' : !hasBed ? '⚠️ BED MISSING' : '☀️ AWAKE'}
                     </div>
                 </div>
                 
@@ -1393,38 +1557,44 @@ function createWebServer(botManager) {
                     </div>
                 </div>
                 
-                ${status.homeLocation ? `
-                <div class="home-info">
-                    <div class="info-label">🏠 Home Bed</div>
-                    <div class="info-value">${status.homeLocation.x}, ${status.homeLocation.y}, ${status.homeLocation.z}</div>
+                <div class="bed-status ${hasBed ? 'bed-ok' : 'bed-missing'}">
+                    <div style="display: flex; justify-content: space-between;">
+                        <span>🛏️ Home Bed: <strong>${bedStatus}</strong></span>
+                        <span>📍 Spawnpoint: <strong>${spawnpointSet ? 'SET' : 'NOT SET'}</strong></span>
+                    </div>
+                    ${status.homeLocation ? `
+                    <div style="margin-top: 5px; font-size: 0.8rem;">
+                        Location: ${status.homeLocation.x}, ${status.homeLocation.y}, ${status.homeLocation.z}
+                    </div>
+                    ` : ''}
                 </div>
-                ` : ''}
                 
                 <div style="margin-top: 10px; font-size: 0.9rem; color: #aaa;">
-                    Sleep Cycles: ${status.metrics.sleepCycles} | Blocks: ${status.metrics.blocksPlaced}/${status.metrics.blocksBroken}
+                    Sleep Cycles: ${status.metrics.sleepCycles} | 
+                    Bed Replacements: ${status.metrics.bedReplacements} | 
+                    Blocks: ${status.metrics.blocksPlaced}/${status.metrics.blocksBroken}
                 </div>
             </div>
-            `).join('')}
+            `}).join('')}
         </div>
         
         <div class="features">
-            <h2>⚡ Features</h2>
+            <h2>⚡ Auto Bed Protection Features</h2>
             <div class="features-grid">
-                <div class="feature">ONE Home Bed</div>
-                <div class="feature">😴 Simple Sleep</div>
-                <div class="feature">🏠 Spawn Point Set</div>
+                <div class="feature">🛏️ ONE Home Bed</div>
+                <div class="feature">📍 Auto Spawnpoint</div>
+                <div class="feature">🔍 Bed Monitoring</div>
+                <div class="feature">🚨 Auto Replacement</div>
+                <div class="feature">😴 Smart Sleep</div>
                 <div class="feature">🧹 Clean Extra Beds</div>
-                <div class="feature">🎯 Basic Activities</div>
+                <div class="feature">🎯 Day Activities</div>
                 <div class="feature">🔗 Auto-Reconnect</div>
-                <div class="feature">💬 Simple Chat</div>
-                <div class="feature">📊 Web Interface</div>
             </div>
         </div>
         
         <div class="footer">
-            <p>✅ ONE Bed System: Each bot has ONE permanent home bed</p>
-            <p>✅ Clean Home Area: Extra beds cleaned every morning</p>
-            <p>✅ Simple Cycle: Day activities → Night sleep → Repeat</p>
+            <p>✅ Bed checked every 5 seconds • Auto-replace if broken • Spawnpoint always set to home</p>
+            <p>✅ Night: Sleep in home bed • Bed occupied: ONE alternative bed • Morning: Cleanup</p>
             <p>Last updated: ${new Date().toLocaleTimeString()} • Auto-refresh: 30s</p>
         </div>
     </div>
@@ -1443,7 +1613,7 @@ function createWebServer(botManager) {
         'Access-Control-Allow-Origin': '*'
       });
       res.end(JSON.stringify({
-        version: '3.0',
+        version: '3.1',
         server: CONFIG.SERVER,
         timestamp: new Date().toISOString(),
         features: CONFIG.FEATURES,
@@ -1467,8 +1637,8 @@ function createWebServer(botManager) {
 // ================= MAIN =================
 async function main() {
   try {
-    logger.log('🚀 Starting Simple Bot System v3.0...', 'info', 'SYSTEM');
-    logger.log('✅ ONE Bed System • Simple Sleep • Clean Home', 'success', 'SYSTEM');
+    logger.log('🚀 Starting Auto Bed Replacement System v3.1...', 'info', 'SYSTEM');
+    logger.log('✅ ONE Bed • Auto Replace • Spawnpoint Protection', 'success', 'SYSTEM');
     
     const botManager = new SimpleBotManager();
     
@@ -1488,12 +1658,13 @@ async function main() {
     
     await botManager.start();
     
-    logger.log('\n🎯 SIMPLE CYCLE:', 'info', 'SYSTEM');
-    logger.log('   ☀️ Day: Basic activities near home', 'day', 'SYSTEM');
-    logger.log('   🌙 Night: Sleep in ONE home bed', 'night', 'SYSTEM');
-    logger.log('   🚫 Bed Occupied: Place ONE alternative bed', 'occupied_bed', 'SYSTEM');
-    logger.log('   ☀️ Morning: Clean extra beds, keep home bed', 'cleanup', 'SYSTEM');
-    logger.log('   🔁 Repeat: Simple and clean', 'success', 'SYSTEM');
+    logger.log('\n🛡️  AUTO BED PROTECTION ACTIVE:', 'info', 'SYSTEM');
+    logger.log('   🔍 Bed monitoring: Every 5 seconds', 'info', 'SYSTEM');
+    logger.log('   🚨 Auto replacement: If bed broken', 'bed_place', 'SYSTEM');
+    logger.log('   📍 Spawnpoint: Always set to home location', 'spawnpoint', 'SYSTEM');
+    logger.log('   😴 Night sleep: In home bed', 'night', 'SYSTEM');
+    logger.log('   🧹 Morning cleanup: Remove extra beds', 'cleanup', 'SYSTEM');
+    logger.log('   🔁 Continuous protection...', 'success', 'SYSTEM');
     
     // Keep running
     while (true) {
