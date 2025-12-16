@@ -1,16 +1,20 @@
 {
   "name": "ultimate-minecraft-bot-system",
-  "version": "2.3.0",
-  "description": "Ultimate Minecraft Bot System with Home System, Building, and Crash Protection",
+  "version": "2.4.0",
+  "description": "Ultimate Minecraft Bot System with Smart Building, Emergency Sleep, and Perfect Structures",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "test": "echo \"No tests specified\" && exit 0"
+    "test": "echo \"No tests specified\" && exit 0",
+    "build": "echo \"No build step required\""
   },
   "dependencies": {
     "mineflayer": "^4.15.0",
     "vec3": "^0.1.8"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -24,9 +28,13 @@
     "auto-sleep",
     "home-system",
     "building",
-    "crash-protection",
+    "smart-building",
+    "emergency-sleep",
+    "structures",
     "minecraft-bot",
-    "automation"
+    "automation",
+    "architecture",
+    "planning"
   ],
   "author": "Your Name",
   "license": "MIT",
@@ -37,5 +45,28 @@
   "bugs": {
     "url": "https://github.com/yourusername/ultimate-minecraft-bot-system/issues"
   },
-  "homepage": "https://github.com/yourusername/ultimate-minecraft-bot-system#readme"
+  "homepage": "https://github.com/yourusername/ultimate-minecraft-bot-system#readme",
+  "contributors": [
+    "Your Name <your.email@example.com>"
+  ],
+  "files": [
+    "server.js",
+    "README.md",
+    "package.json"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "minecraft-bot": "./server.js"
+  },
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
 }
