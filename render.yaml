@@ -3,14 +3,15 @@ services:
     name: ultimate-minecraft-bots-fixed
     env: node
     buildCommand: npm install
-    startCommand: npm start
+    startCommand: node index.js
     envVars:
       - key: NODE_VERSION
-        value: 20 # Updated to a recent stable LTS version (Node 20).
-      # The PORT variable is removed. Render automatically sets the PORT environment variable (default 10000). 
-      # Your Node.js application should be configured to listen on process.env.PORT.
+        value: 20 # Using Node.js LTS version 20
+      - key: MINECRAFT_HOST
+        value: gameplannet.aternos.me
+      - key: MINECRAFT_PORT
+        value: 43658
+      # The PORT variable is not needed here; Render sets it automatically.
     healthCheckPath: /health
-    # Updated: Use the explicit 'commit' value for auto-deployment on every push,
-    # replacing the deprecated boolean 'true'.
-    autoDeploy: commit
+    autoDeploy: commit # Recommended syntax for automatic deploys on commit
     plan: free
