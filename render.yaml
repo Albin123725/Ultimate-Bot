@@ -5,10 +5,12 @@ services:
     buildCommand: npm install
     startCommand: npm start
     envVars:
-      - key: PORT
-        value: 3000
       - key: NODE_VERSION
-        value: 18.17.0
+        value: 20 # Updated to a recent stable LTS version (Node 20).
+      # The PORT variable is removed. Render automatically sets the PORT environment variable (default 10000). 
+      # Your Node.js application should be configured to listen on process.env.PORT.
     healthCheckPath: /health
-    autoDeploy: true
+    # Updated: Use the explicit 'commit' value for auto-deployment on every push,
+    # replacing the deprecated boolean 'true'.
+    autoDeploy: commit
     plan: free
