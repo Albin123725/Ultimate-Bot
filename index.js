@@ -119,7 +119,7 @@ class UltimateBot {
       port: CONFIG.SERVER.port,
       username: this.state.username,
       version: CONFIG.SERVER.version,
-      // *** FIX: Use 'offline' auth for cracked servers ***
+      // FIX: Use 'offline' auth for cracked servers
       auth: 'offline' 
     };
 
@@ -186,10 +186,15 @@ class UltimateBot {
     this.bot.loadPlugin(require('mineflayer-auto-eat').plugin);
     
     // Configure auto-eat (if needed)
-    this.bot.autoEat.options = {
-        priority: 'foodPoints',
-        startAt: 14,
-        bannedFood: []
+    // *** FIX: Added a check for this.bot.autoEat to prevent the "Cannot set properties of undefined (setting 'options')" error
+    if (this.bot.autoEat) {
+        this.bot.autoEat.options = {
+            priority: 'foodPoints',
+            startAt: 14,
+            bannedFood: []
+        }
+    } else {
+        logger.log('WARN: mineflayer-auto-eat failed to load correctly.', 'warn', this.state.username);
     }
   }
 
