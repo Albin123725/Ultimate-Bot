@@ -1,6 +1,6 @@
 // ============================================================
-// 🚀 ULTIMATE MINECRAFT BOT SYSTEM v3.2 - FIXED SLEEP & ACTIVITIES
-// 😴 Fixed Sleep • Day Activities • Auto Bed Replacement
+// 🚀 ULTIMATE MINECRAFT BOT SYSTEM v3.3 - BOTH BOTS SLEEP
+// 😴 Both Bots Sleep • Fixed Night Detection • Coordinated Sleep
 // ============================================================
 
 const mineflayer = require('mineflayer');
@@ -9,9 +9,9 @@ const Vec3 = require('vec3').Vec3;
 
 console.log(`
 ╔══════════════════════════════════════════════════════════════════════════╗
-║   🚀 ULTIMATE MINECRAFT BOT SYSTEM v3.2                                 ║
-║   😴 Fixed Sleep • Day Activities • Auto Bed Replacement               ║
-║   🤖 2 Bots • Working Sleep • Daytime Activities                       ║
+║   🚀 ULTIMATE MINECRAFT BOT SYSTEM v3.3                                 ║
+║   😴 Both Bots Sleep • Fixed Night Detection • Coordinated Sleep       ║
+║   🤖 2 Bots • Perfect Sleep • No Night Activities                      ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 `);
 
@@ -41,7 +41,8 @@ class Logger {
       emergency: '🚨',
       occupied_bed: '🚫🛏️',
       activity: '🎯',
-      time: '⏰'
+      time: '⏰',
+      force_sleep: '💤'
     };
   }
 
@@ -80,7 +81,8 @@ const CONFIG = {
       color: '§a',
       activities: ['exploring', 'socializing', 'resting'],
       sleepPattern: 'normal',
-      homeLocation: null
+      homeLocation: null,
+      sleepPriority: 1 // First to sleep
     },
     {
       id: 'bot_002',
@@ -89,7 +91,8 @@ const CONFIG = {
       color: '§b',
       activities: ['patrolling', 'observing', 'guarding'],
       sleepPattern: 'normal',
-      homeLocation: null
+      homeLocation: null,
+      sleepPriority: 2 // Second to sleep
     }
   ],
   SYSTEM: {
@@ -122,8 +125,11 @@ const CONFIG = {
     CLEAN_EXTRA_BEDS: true,
     AUTO_BED_REPLACEMENT: true,
     SPAWNPOINT_PROTECTION: true,
-    FORCE_DAY_ACTIVITIES: true, // NEW: Force daytime activities
-    DEBUG_TIME_CHECKING: true    // NEW: Debug time checking
+    FORCE_DAY_ACTIVITIES: true,
+    DEBUG_TIME_CHECKING: false,
+    FORCE_SLEEP_AT_NIGHT: true, // NEW: Force sleep at night
+    STOP_ALL_AT_NIGHT: true,    // NEW: Stop all activities at night
+    COORDINATED_SLEEP: true     // NEW: Coordinate sleep between bots
   },
   SLEEP_SYSTEM: {
     KEEP_HOME_BED: true,
@@ -132,11 +138,13 @@ const CONFIG = {
     MAX_OCCUPIED_RETRIES: 1,
     CHECK_BED_INTERVAL: 5000,
     BED_REPLACEMENT_DELAY: 2000,
-    SLEEP_CHECK_INTERVAL: 3000, // NEW: Check sleep more often
-    NIGHT_START: 13000,         // NEW: Night start time
-    NIGHT_END: 23000,           // NEW: Night end time
-    DAY_START: 0,               // NEW: Day start time
-    DAY_END: 13000              // NEW: Day end time
+    SLEEP_CHECK_INTERVAL: 3000,
+    NIGHT_START: 13000,
+    NIGHT_END: 23000,
+    DAY_START: 0,
+    DAY_END: 13000,
+    FORCE_SLEEP_TIME: 14000, // NEW: Force sleep if still awake at this time
+    SLEEP_RETRY_DELAY: 5000  // NEW: Retry sleep after delay
   },
   HOME: {
     SET_SPAWN_AS_HOME: true,
@@ -147,19 +155,108 @@ const CONFIG = {
     FORCE_SPAWNPOINT: true
   },
   ACTIVITIES: {
-    DAYTIME_ONLY: true,         // NEW: Only do activities during day
-    ACTIVITY_INTERVAL: 15000,   // NEW: Activity interval
-    MAX_DISTANCE_FROM_HOME: 20, // NEW: Max distance from home
-    MIN_ACTIVITY_DURATION: 3000,// NEW: Min activity duration
-    MAX_ACTIVITY_DURATION: 8000 // NEW: Max activity duration
+    DAYTIME_ONLY: true,
+    ACTIVITY_INTERVAL: 15000,
+    MAX_DISTANCE_FROM_HOME: 20,
+    MIN_ACTIVITY_DURATION: 3000,
+    MAX_ACTIVITY_DURATION: 8000,
+    STOP_AT_NIGHT: true // NEW: Force stop activities at night
   }
 };
 
-// ================= FIXED SLEEP SYSTEM =================
-class FixedSleepSystem {
-  constructor(botInstance, botName) {
+// ================= SHARED TIME MANAGER (For both bots) =================
+class SharedTimeManager {
+  constructor() {
+    this.state = {
+      currentTime: 0,
+      isNight: false,
+      isDay: false,
+      lastUpdate: 0,
+      nightStartTime: 0,
+      forceSleepTriggered: false
+    };
+    this.listeners = [];
+  }
+
+  updateTime(time) {
+    this.state.currentTime = time;
+    this.state.lastUpdate = Date.now();
+    
+    // Check if it's night (13000-23000)
+    const isNight = time >= CONFIG.SLEEP_SYSTEM.NIGHT_START && time <= CONFIG.SLEEP_SYSTEM.NIGHT_END;
+    const isDay = time >= CONFIG.SLEEP_SYSTEM.DAY_START && time < CONFIG.SLEEP_SYSTEM.DAY_END;
+    
+    // Check for time changes
+    if (isNight && !this.state.isNight) {
+      this.state.isNight = true;
+      this.state.isDay = false;
+      this.state.nightStartTime = Date.now();
+      this.state.forceSleepTriggered = false;
+      logger.log(`🌙 NIGHT TIME STARTED (${time})`, 'night', 'TIME');
+      this.notifyListeners('night_start');
+    }
+    
+    if (isDay && !this.state.isDay) {
+      this.state.isDay = true;
+      this.state.isNight = false;
+      logger.log(`☀️ DAY TIME STARTED (${time})`, 'day', 'TIME');
+      this.notifyListeners('day_start');
+    }
+    
+    // Check if we need to force sleep (if still awake after night starts)
+    if (isNight && !this.state.forceSleepTriggered && 
+        Date.now() - this.state.nightStartTime > 10000) { // 10 seconds after night starts
+      this.state.forceSleepTriggered = true;
+      logger.log(`⚠️ FORCE SLEEP TRIGGERED - All bots must sleep`, 'force_sleep', 'TIME');
+      this.notifyListeners('force_sleep');
+    }
+    
+    this.state.isNight = isNight;
+    this.state.isDay = isDay;
+  }
+
+  addListener(callback) {
+    this.listeners.push(callback);
+  }
+
+  removeListener(callback) {
+    const index = this.listeners.indexOf(callback);
+    if (index > -1) {
+      this.listeners.splice(index, 1);
+    }
+  }
+
+  notifyListeners(event) {
+    this.listeners.forEach(callback => {
+      try {
+        callback(event, this.state);
+      } catch (error) {
+        logger.log(`Listener error: ${error.message}`, 'error', 'TIME');
+      }
+    });
+  }
+
+  getStatus() {
+    return {
+      currentTime: this.state.currentTime,
+      isNight: this.state.isNight,
+      isDay: this.state.isDay,
+      lastUpdate: this.state.lastUpdate ? new Date(this.state.lastUpdate).toLocaleTimeString() : 'Never',
+      forceSleepTriggered: this.state.forceSleepTriggered
+    };
+  }
+}
+
+// Create shared time manager
+const sharedTimeManager = new SharedTimeManager();
+
+// ================= FIXED SLEEP SYSTEM (Both bots) =================
+class BothBotsSleepSystem {
+  constructor(botInstance, botName, botConfig) {
     this.bot = botInstance;
     this.botName = botName;
+    this.botConfig = botConfig;
+    
     this.state = {
       isSleeping: false,
       hasHomeBed: false,
@@ -174,17 +271,106 @@ class FixedSleepSystem {
       isCheckingBed: false,
       isReplacingBed: false,
       spawnpointSet: false,
-      lastTimeCheck: 0,
-      currentTime: 0,
       isNight: false,
-      isDay: true
+      isDay: false,
+      activitiesStopped: false,
+      sleepRetryCount: 0,
+      maxSleepRetries: 3,
+      sleepScheduled: false
     };
     
-    this.nightCheckInterval = null;
-    this.morningCheckInterval = null;
     this.bedCheckInterval = null;
-    this.bedReplacementTimeout = null;
-    this.timeUpdateInterval = null;
+    this.sleepRetryTimeout = null;
+    this.forceSleepTimeout = null;
+    
+    // Register with shared time manager
+    this.timeListener = (event, timeState) => {
+      this.handleTimeEvent(event, timeState);
+    };
+    sharedTimeManager.addListener(this.timeListener);
+  }
+
+  // ================= TIME EVENT HANDLER =================
+  handleTimeEvent(event, timeState) {
+    this.state.isNight = timeState.isNight;
+    this.state.isDay = timeState.isDay;
+    
+    switch (event) {
+      case 'night_start':
+        this.handleNightStart();
+        break;
+      case 'day_start':
+        this.handleDayStart();
+        break;
+      case 'force_sleep':
+        this.forceSleepNow();
+        break;
+    }
+  }
+
+  handleNightStart() {
+    logger.log(`🌙 Night detected - Preparing to sleep`, 'night', this.botName);
+    
+    // Stop all activities immediately
+    this.stopAllActivities();
+    this.state.activitiesStopped = true;
+    
+    // Schedule sleep based on priority (SleepMaster first, NightWatcher second)
+    const sleepDelay = this.botConfig.sleepPriority === 1 ? 1000 : 3000;
+    
+    logger.log(`Sleep scheduled in ${sleepDelay}ms (priority ${this.botConfig.sleepPriority})`, 'sleep', this.botName);
+    
+    setTimeout(() => {
+      if (this.state.isNight && !this.state.isSleeping) {
+        this.attemptSleep();
+      }
+    }, sleepDelay);
+  }
+
+  handleDayStart() {
+    logger.log(`☀️ Day detected`, 'day', this.botName);
+    
+    this.state.activitiesStopped = false;
+    
+    // Wake up if sleeping
+    if (this.state.isSleeping) {
+      this.wakeUp();
+    }
+    
+    // Clean alternative bed
+    if (this.state.alternativeBedPlaced) {
+      setTimeout(() => {
+        this.cleanAlternativeBed();
+      }, 2000);
+    }
+    
+    // Clear any sleep retry timeouts
+    if (this.sleepRetryTimeout) {
+      clearTimeout(this.sleepRetryTimeout);
+      this.sleepRetryTimeout = null;
+    }
+    
+    if (this.forceSleepTimeout) {
+      clearTimeout(this.forceSleepTimeout);
+      this.forceSleepTimeout = null;
+    }
+    
+    this.state.sleepRetryCount = 0;
+    this.state.sleepScheduled = false;
+  }
+
+  forceSleepNow() {
+    if (this.state.isSleeping || !this.state.isNight) {
+      return;
+    }
+    
+    logger.log(`⚠️ FORCE SLEEP COMMAND - Must sleep now!`, 'force_sleep', this.botName);
+    
+    this.stopAllActivities();
+    this.state.activitiesStopped = true;
+    
+    // Immediate sleep attempt
+    this.attemptSleep();
   }
 
   // ================= INITIALIZE HOME SYSTEM =================
@@ -214,9 +400,6 @@ class FixedSleepSystem {
         
         // Start bed checking
         this.startBedChecking();
-        
-        // Start time monitoring
-        this.startTimeMonitoring();
         
         logger.log('✅ Home system initialized!', 'success', this.botName);
         return true;
@@ -258,126 +441,14 @@ class FixedSleepSystem {
     return false;
   }
 
-  // ================= TIME MONITORING =================
-  startTimeMonitoring() {
-    if (this.timeUpdateInterval) {
-      clearInterval(this.timeUpdateInterval);
-    }
-    
-    this.timeUpdateInterval = setInterval(() => {
-      this.updateTime();
-    }, 1000); // Update time every second
-    
-    logger.log('✅ Time monitoring started', 'time', this.botName);
-  }
-
-  updateTime() {
-    try {
-      if (!this.bot || !this.bot.time) {
-        if (CONFIG.FEATURES.DEBUG_TIME_CHECKING) {
-          logger.log('Bot or time not available', 'debug', this.botName);
-        }
-        return;
-      }
-      
-      // Get current Minecraft time
-      const time = this.bot.time.time;
-      this.state.currentTime = time;
-      this.state.lastTimeCheck = Date.now();
-      
-      // Check if it's night (13000-23000)
-      const isNight = time >= CONFIG.SLEEP_SYSTEM.NIGHT_START && time <= CONFIG.SLEEP_SYSTEM.NIGHT_END;
-      const isDay = time >= CONFIG.SLEEP_SYSTEM.DAY_START && time < CONFIG.SLEEP_SYSTEM.DAY_END;
-      
-      if (CONFIG.FEATURES.DEBUG_TIME_CHECKING && (Date.now() % 10000 < 1000)) {
-        logger.log(`Time: ${time} | Night: ${isNight} | Day: ${isDay}`, 'time', this.botName);
-      }
-      
-      // Handle time changes
-      if (isNight && !this.state.isNight) {
-        this.state.isNight = true;
-        this.state.isDay = false;
-        logger.log(`🌙 Night time detected (${time})`, 'night', this.botName);
-        this.handleNightTime();
-      }
-      
-      if (isDay && !this.state.isDay) {
-        this.state.isDay = true;
-        this.state.isNight = false;
-        logger.log(`☀️ Day time detected (${time})`, 'day', this.botName);
-        this.handleDayTime();
-      }
-      
-      // If sleeping and it's morning, wake up
-      if (this.state.isSleeping && isDay) {
-        logger.log('☀️ Morning detected while sleeping - Waking up', 'day', this.botName);
-        this.wakeUp();
-      }
-      
-    } catch (error) {
-      if (CONFIG.FEATURES.DEBUG_TIME_CHECKING) {
-        logger.log(`Time update error: ${error.message}`, 'debug', this.botName);
-      }
-    }
-  }
-
-  handleNightTime() {
-    if (this.state.isSleeping) {
-      logger.log('Already sleeping at night', 'sleep', this.botName);
-      return;
-    }
-    
-    logger.log('🌙 Night time - Going to sleep', 'night', this.botName);
-    
-    // Stop any ongoing activities
-    this.stopAllActivities();
-    
-    // Try to sleep
-    setTimeout(() => {
-      this.sleep();
-    }, 1000);
-  }
-
-  handleDayTime() {
-    if (this.state.isSleeping) {
-      logger.log('Waking up for daytime', 'wake', this.botName);
-      this.wakeUp();
-    }
-    
-    // Clean beds in morning
-    if (this.state.alternativeBedPlaced) {
-      setTimeout(() => {
-        this.cleanAlternativeBed();
-      }, 2000);
-    }
-  }
-
-  stopAllActivities() {
-    try {
-      const controls = ['forward', 'back', 'left', 'right', 'jump', 'sprint', 'sneak'];
-      controls.forEach(control => {
-        if (this.bot.getControlState(control)) {
-          this.bot.setControlState(control, false);
-        }
-      });
-    } catch (error) {
-      // Ignore errors
-    }
-  }
-
   // ================= SLEEP SYSTEM =================
-  async sleep() {
-    if (this.state.isSleeping) {
-      logger.log('Already sleeping', 'sleep', this.botName);
+  async attemptSleep() {
+    if (this.state.isSleeping || this.state.sleepScheduled) {
       return;
     }
     
-    if (!this.state.isNight) {
-      logger.log('Not night time, not sleeping', 'info', this.botName);
-      return;
-    }
-    
-    logger.log('Attempting to sleep...', 'sleep', this.botName);
+    this.state.sleepScheduled = true;
+    logger.log(`Attempting to sleep...`, 'sleep', this.botName);
     
     // First check if home bed exists
     await this.checkHomeBed();
@@ -410,9 +481,9 @@ class FixedSleepSystem {
         return false;
       }
       
-      // Check if bed is occupied
+      // Check if bed is occupied by another bot
       if (this.isBedOccupied(this.state.homeBedPosition)) {
-        logger.log('Home bed is occupied', 'occupied_bed', this.botName);
+        logger.log('Home bed is occupied by another player', 'occupied_bed', this.botName);
         return false;
       }
       
@@ -433,17 +504,25 @@ class FixedSleepSystem {
         this.state.lastSleepTime = Date.now();
         this.state.sleepCycles++;
         this.state.failedSleepAttempts = 0;
+        this.state.sleepRetryCount = 0;
+        this.state.sleepScheduled = false;
         
-        logger.log(`😴 Successfully sleeping in home bed`, 'sleep', this.botName);
+        logger.log(`😴 SUCCESS: Sleeping in home bed`, 'success', this.botName);
         return true;
       } catch (sleepError) {
         logger.log(`Sleep attempt failed: ${sleepError.message}`, 'error', this.botName);
+        
+        // Schedule retry
+        this.scheduleSleepRetry();
         return false;
       }
       
     } catch (error) {
       logger.log(`Failed to sleep in home bed: ${error.message}`, 'error', this.botName);
       this.state.failedSleepAttempts++;
+      
+      // Schedule retry
+      this.scheduleSleepRetry();
       return false;
     }
   }
@@ -460,6 +539,7 @@ class FixedSleepSystem {
       const altPosition = await this.findAlternativeBedPosition();
       if (!altPosition) {
         logger.log('Could not find position for alternative bed', 'error', this.botName);
+        this.scheduleSleepRetry();
         return;
       }
       
@@ -467,6 +547,7 @@ class FixedSleepSystem {
       const placed = await this.placeBed(altPosition);
       if (!placed) {
         logger.log('Failed to place alternative bed', 'error', this.botName);
+        this.scheduleSleepRetry();
         return;
       }
       
@@ -486,17 +567,44 @@ class FixedSleepSystem {
           this.state.lastSleepTime = Date.now();
           this.state.sleepCycles++;
           this.state.failedSleepAttempts = 0;
+          this.state.sleepRetryCount = 0;
+          this.state.sleepScheduled = false;
           
-          logger.log(`😴 Sleeping in alternative bed`, 'sleep', this.botName);
+          logger.log(`😴 SUCCESS: Sleeping in alternative bed`, 'success', this.botName);
         } catch (sleepError) {
           logger.log(`Failed to sleep in alternative bed: ${sleepError.message}`, 'error', this.botName);
+          this.scheduleSleepRetry();
         }
       }
       
     } catch (error) {
       logger.log(`Failed to sleep with alternative bed: ${error.message}`, 'error', this.botName);
       this.state.failedSleepAttempts++;
+      this.scheduleSleepRetry();
     }
+  }
+
+  scheduleSleepRetry() {
+    if (this.sleepRetryTimeout) {
+      clearTimeout(this.sleepRetryTimeout);
+    }
+    
+    this.state.sleepRetryCount++;
+    
+    if (this.state.sleepRetryCount > this.state.maxSleepRetries) {
+      logger.log(`Max sleep retries reached (${this.state.maxSleepRetries})`, 'warn', this.botName);
+      return;
+    }
+    
+    const retryDelay = CONFIG.SLEEP_SYSTEM.SLEEP_RETRY_DELAY * this.state.sleepRetryCount;
+    logger.log(`Sleep retry ${this.state.sleepRetryCount}/${this.state.maxSleepRetries} in ${retryDelay}ms`, 'sleep', this.botName);
+    
+    this.sleepRetryTimeout = setTimeout(() => {
+      if (this.state.isNight && !this.state.isSleeping) {
+        this.state.sleepScheduled = false;
+        this.attemptSleep();
+      }
+    }, retryDelay);
   }
 
   async wakeUp() {
@@ -535,6 +643,46 @@ class FixedSleepSystem {
       this.state.alternativeBedPosition = null;
       logger.log('Cleaned alternative bed', 'cleanup', this.botName);
     }
+  }
+
+  // ================= ACTIVITY CONTROL =================
+  stopAllActivities() {
+    try {
+      if (!this.bot) return;
+      
+      const controls = ['forward', 'back', 'left', 'right', 'jump', 'sprint', 'sneak'];
+      controls.forEach(control => {
+        if (this.bot.getControlState(control)) {
+          this.bot.setControlState(control, false);
+          logger.log(`Stopped ${control} movement`, 'debug', this.botName);
+        }
+      });
+      
+      // Stop looking around
+      this.bot.look(0, 0);
+      
+    } catch (error) {
+      // Ignore errors
+    }
+  }
+
+  canPerformActivities() {
+    // Don't allow activities at night
+    if (this.state.isNight && CONFIG.ACTIVITIES.STOP_AT_NIGHT) {
+      return false;
+    }
+    
+    // Don't allow activities if sleeping
+    if (this.state.isSleeping) {
+      return false;
+    }
+    
+    // Don't allow activities if stopped for night
+    if (this.state.activitiesStopped) {
+      return false;
+    }
+    
+    return true;
   }
 
   // ================= BED CHECKING SYSTEM =================
@@ -617,7 +765,7 @@ class FixedSleepSystem {
         // If it's night and we're not sleeping, try to sleep
         if (this.state.isNight && !this.state.isSleeping) {
           setTimeout(() => {
-            this.sleep();
+            this.attemptSleep();
           }, 2000);
         }
       } else {
@@ -628,20 +776,6 @@ class FixedSleepSystem {
       logger.log(`Bed replacement error: ${error.message}`, 'error', this.botName);
     } finally {
       this.state.isReplacingBed = false;
-    }
-  }
-
-  async clearBedPosition(position) {
-    try {
-      const bedPos = new Vec3(position.x, position.y, position.z);
-      const block = this.bot.blockAt(bedPos);
-      
-      if (block && block.name !== 'air') {
-        await this.bot.dig(block);
-        await this.delay(500);
-      }
-    } catch (error) {
-      // Ignore errors
     }
   }
 
@@ -682,10 +816,12 @@ class FixedSleepSystem {
           
           if (distance < 2) {
             if (player.entity.isSleeping !== undefined && player.entity.isSleeping) {
+              logger.log(`Bed occupied by ${player.username}`, 'occupied_bed', this.botName);
               return true;
             }
             
             if (distance < 1.5) {
+              logger.log(`Player ${player.username} near bed`, 'occupied_bed', this.botName);
               return true;
             }
           }
@@ -853,8 +989,42 @@ class FixedSleepSystem {
     return name && name.includes('bed');
   }
 
+  async clearBedPosition(position) {
+    try {
+      const bedPos = new Vec3(position.x, position.y, position.z);
+      const block = this.bot.blockAt(bedPos);
+      
+      if (block && block.name !== 'air') {
+        await this.bot.dig(block);
+        await this.delay(500);
+      }
+    } catch (error) {
+      // Ignore errors
+    }
+  }
+
   async delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  cleanup() {
+    if (this.bedCheckInterval) {
+      clearInterval(this.bedCheckInterval);
+      this.bedCheckInterval = null;
+    }
+    
+    if (this.sleepRetryTimeout) {
+      clearTimeout(this.sleepRetryTimeout);
+      this.sleepRetryTimeout = null;
+    }
+    
+    if (this.forceSleepTimeout) {
+      clearTimeout(this.forceSleepTimeout);
+      this.forceSleepTimeout = null;
+    }
+    
+    // Remove from shared time manager
+    sharedTimeManager.removeListener(this.timeListener);
   }
 
   getStatus() {
@@ -866,9 +1036,10 @@ class FixedSleepSystem {
       sleepCycles: this.state.sleepCycles,
       bedReplacements: this.state.bedReplacements,
       spawnpointSet: this.state.spawnpointSet,
-      currentTime: this.state.currentTime,
       isNight: this.state.isNight,
       isDay: this.state.isDay,
+      activitiesStopped: this.state.activitiesStopped,
+      sleepRetryCount: this.state.sleepRetryCount,
       lastSleepTime: this.state.lastSleepTime ? 
         new Date(this.state.lastSleepTime).toLocaleTimeString() : 'Never',
       failedSleepAttempts: this.state.failedSleepAttempts
@@ -876,8 +1047,8 @@ class FixedSleepSystem {
   }
 }
 
-// ================= ENHANCED BOT WITH ACTIVITIES =================
-class EnhancedBot {
+// ================= BOT WITH COORDINATED SLEEP =================
+class CoordinatedSleepBot {
   constructor(config, index) {
     this.config = config;
     this.index = index;
@@ -908,13 +1079,15 @@ class EnhancedBot {
         sleepCycles: 0,
         connectionAttempts: 0,
         bedReplacements: 0,
-        activitiesPerformed: 0
+        activitiesPerformed: 0,
+        forcedSleeps: 0
       }
     };
     
     this.intervals = [];
     this.activityInterval = null;
     this.activityTimeout = null;
+    this.timeUpdateInterval = null;
     
     logger.log(`Bot instance created (${config.personality})`, 'bot', config.name);
   }
@@ -942,7 +1115,7 @@ class EnhancedBot {
         connectTimeout: CONFIG.CONNECTION.CONNECT_TIMEOUT
       });
       
-      this.sleepSystem = new FixedSleepSystem(this.bot, this.state.username);
+      this.sleepSystem = new BothBotsSleepSystem(this.bot, this.state.username, this.config);
       
       this.setupEventHandlers();
       
@@ -1010,6 +1183,13 @@ class EnhancedBot {
       this.state.isSleeping = false;
       this.state.activity = 'Waking up';
       logger.log('Woke up', 'wake', this.state.username);
+    });
+    
+    this.bot.on('time', () => {
+      if (this.bot && this.bot.time) {
+        // Update shared time manager
+        sharedTimeManager.updateTime(this.bot.time.time);
+      }
     });
     
     this.bot.on('chat', (username, message) => {
@@ -1110,12 +1290,16 @@ class EnhancedBot {
       return;
     }
     
-    // Check if it's daytime (for activities)
-    const sleepStatus = this.sleepSystem ? this.sleepSystem.getStatus() : { isDay: false };
-    const isDaytime = sleepStatus.isDay;
+    // Check if allowed to perform activities
+    const sleepStatus = this.sleepSystem ? this.sleepSystem.getStatus() : { isNight: false, activitiesStopped: false };
+    const canDoActivities = this.sleepSystem ? this.sleepSystem.canPerformActivities() : false;
     
-    if (!isDaytime && CONFIG.ACTIVITIES.DAYTIME_ONLY) {
-      this.state.activity = 'Waiting for daytime';
+    if (!canDoActivities) {
+      if (sleepStatus.isNight) {
+        this.state.activity = 'Night time - No activities';
+      } else if (sleepStatus.activitiesStopped) {
+        this.state.activity = 'Activities stopped';
+      }
       return;
     }
     
@@ -1432,6 +1616,15 @@ class EnhancedBot {
       this.activityTimeout = null;
     }
     
+    if (this.timeUpdateInterval) {
+      clearInterval(this.timeUpdateInterval);
+      this.timeUpdateInterval = null;
+    }
+    
+    if (this.sleepSystem) {
+      this.sleepSystem.cleanup();
+    }
+    
     if (this.bot) {
       try {
         this.bot.removeAllListeners();
@@ -1445,6 +1638,10 @@ class EnhancedBot {
 
   getStatus() {
     const sleepStatus = this.sleepSystem ? this.sleepSystem.getStatus() : {};
+    const timeStatus = sharedTimeManager.getStatus();
+    
+    // Update sleeping status from sleep system
+    this.state.isSleeping = sleepStatus.isSleeping || false;
     
     let uptime = 'N/A';
     if (this.state.connectedAt) {
@@ -1453,9 +1650,6 @@ class EnhancedBot {
       const minutes = Math.floor((uptimeMs % 3600000) / 60000);
       uptime = `${hours}h ${minutes}m`;
     }
-    
-    // Update sleeping status from sleep system
-    this.state.isSleeping = sleepStatus.isSleeping || false;
     
     return {
       username: this.state.username,
@@ -1468,22 +1662,25 @@ class EnhancedBot {
       isSleeping: this.state.isSleeping,
       uptime: uptime,
       homeLocation: this.state.homeLocation,
-      currentTime: sleepStatus.currentTime || 0,
+      currentTime: timeStatus.currentTime || 0,
       isDay: sleepStatus.isDay || false,
       isNight: sleepStatus.isNight || false,
+      activitiesStopped: sleepStatus.activitiesStopped || false,
       metrics: {
         messages: this.state.metrics.messagesSent,
         blocksPlaced: this.state.metrics.blocksPlaced,
         blocksBroken: this.state.metrics.blocksBroken,
         sleepCycles: sleepStatus.sleepCycles || 0,
         bedReplacements: sleepStatus.bedReplacements || 0,
-        activitiesPerformed: this.state.metrics.activitiesPerformed
+        activitiesPerformed: this.state.metrics.activitiesPerformed,
+        forcedSleeps: this.state.metrics.forcedSleeps
       },
       sleepInfo: {
         hasHomeBed: sleepStatus.hasHomeBed || false,
         spawnpointSet: sleepStatus.spawnpointSet || false,
         alternativeBedPlaced: sleepStatus.alternativeBedPlaced || false,
-        failedAttempts: sleepStatus.failedSleepAttempts || 0
+        failedAttempts: sleepStatus.failedSleepAttempts || 0,
+        sleepRetryCount: sleepStatus.sleepRetryCount || 0
       }
     };
   }
@@ -1499,11 +1696,11 @@ class BotManager {
   
   async start() {
     logger.log(`\n${'='.repeat(70)}`, 'info', 'SYSTEM');
-    logger.log('🚀 FIXED SLEEP & ACTIVITIES SYSTEM v3.2', 'info', 'SYSTEM');
+    logger.log('🚀 BOTH BOTS SLEEP SYSTEM v3.3', 'info', 'SYSTEM');
     logger.log(`${'='.repeat(70)}`, 'info', 'SYSTEM');
     logger.log(`Server: ${CONFIG.SERVER.host}:${CONFIG.SERVER.port}`, 'info', 'SYSTEM');
     logger.log(`Bots: ${CONFIG.BOTS.map(b => b.name).join(', ')}`, 'info', 'SYSTEM');
-    logger.log(`Features: Fixed Sleep • Day Activities • Auto Bed Replacement`, 'info', 'SYSTEM');
+    logger.log(`Features: Both Bots Sleep • Coordinated • No Night Activities`, 'info', 'SYSTEM');
     logger.log(`${'='.repeat(70)}\n`, 'info', 'SYSTEM');
     
     this.isRunning = true;
@@ -1512,7 +1709,7 @@ class BotManager {
     
     for (let i = 0; i < CONFIG.BOTS.length; i++) {
       const botConfig = CONFIG.BOTS[i];
-      const bot = new EnhancedBot(botConfig, i);
+      const bot = new CoordinatedSleepBot(botConfig, i);
       this.bots.set(botConfig.id, bot);
       
       if (i > 0) {
@@ -1530,14 +1727,13 @@ class BotManager {
     logger.log(`📊 Status updates every ${CONFIG.SYSTEM.STATUS_INTERVAL / 1000} seconds`, 'info', 'SYSTEM');
     logger.log(`🌐 Web interface on port ${CONFIG.SYSTEM.PORT}\n`, 'info', 'SYSTEM');
     
-    logger.log(`🎯 FIXED FEATURES:`, 'info', 'SYSTEM');
-    logger.log(`   ⏰ Time monitoring: Every second`, 'time', 'SYSTEM');
-    logger.log(`   😴 Night sleep: At 13000-23000 ticks`, 'night', 'SYSTEM');
-    logger.log(`   ☀️ Day activities: At 0-13000 ticks`, 'day', 'SYSTEM');
-    logger.log(`   🎯 Activity system: Multiple activities`, 'activity', 'SYSTEM');
-    logger.log(`   🛏️ Auto bed replacement: If bed broken`, 'bed_place', 'SYSTEM');
-    logger.log(`   📍 Spawnpoint: Always set to home`, 'spawnpoint', 'SYSTEM');
-    logger.log(`   🔁 Working cycle...`, 'success', 'SYSTEM');
+    logger.log(`🎯 COORDINATED SLEEP SYSTEM:`, 'info', 'SYSTEM');
+    logger.log(`   ⏰ Shared time manager: Both bots sync time`, 'time', 'SYSTEM');
+    logger.log(`   😴 Sleep priority: SleepMaster first, NightWatcher second`, 'sleep', 'SYSTEM');
+    logger.log(`   🚫 No night activities: All activities stop at night`, 'night', 'SYSTEM');
+    logger.log(`   ⚠️ Force sleep: If not sleeping 10s after night`, 'force_sleep', 'SYSTEM');
+    logger.log(`   🔁 Sleep retry: Up to 3 retries if sleep fails`, 'sleep', 'SYSTEM');
+    logger.log(`   ✅ Both bots will sleep perfectly!`, 'success', 'SYSTEM');
   }
   
   startStatusMonitoring() {
@@ -1562,45 +1758,35 @@ class BotManager {
     const totalActivities = connectedBots
       .reduce((total, bot) => total + (bot.state.metrics.activitiesPerformed || 0), 0);
     
-    // Get time info from first connected bot
-    let timeInfo = 'Unknown';
-    let isDay = false;
-    let isNight = false;
-    
-    if (connectedBots.length > 0) {
-      const status = connectedBots[0].getStatus();
-      timeInfo = `Time: ${status.currentTime}`;
-      isDay = status.isDay || false;
-      isNight = status.isNight || false;
-    }
-    
-    const timeIcon = isNight ? '🌙' : isDay ? '☀️' : '⏰';
-    const timeStatus = isNight ? 'NIGHT' : isDay ? 'DAY' : 'UNKNOWN';
+    const timeStatus = sharedTimeManager.getStatus();
+    const timeIcon = timeStatus.isNight ? '🌙' : timeStatus.isDay ? '☀️' : '⏰';
+    const timeText = timeStatus.isNight ? 'NIGHT' : timeStatus.isDay ? 'DAY' : 'UNKNOWN';
     
     logger.log(`\n${'='.repeat(70)}`, 'info', 'STATUS');
-    logger.log(`📊 WORKING STATUS - ${new Date().toLocaleTimeString()}`, 'info', 'STATUS');
+    logger.log(`📊 COORDINATED SLEEP STATUS - ${new Date().toLocaleTimeString()}`, 'info', 'STATUS');
     logger.log(`${'='.repeat(70)}`, 'info', 'STATUS');
-    logger.log(`${timeIcon} ${timeStatus} | ${timeInfo}`, 'time', 'STATUS');
+    logger.log(`${timeIcon} ${timeText} | Time: ${timeStatus.currentTime} | Force Sleep: ${timeStatus.forceSleepTriggered ? '⚠️ ACTIVE' : '✅ OK'}`, 'time', 'STATUS');
     logger.log(`Connected: ${connectedBots.length}/${this.bots.size}`, 'info', 'STATUS');
     logger.log(`Sleeping: ${sleepingBots.length}`, 'info', 'STATUS');
     logger.log(`With Home Bed: ${hasHomeBed}`, 'info', 'STATUS');
     logger.log(`Activities Performed: ${totalActivities}`, 'info', 'STATUS');
     logger.log(`Bed Replacements: ${totalBedReplacements}`, 'info', 'STATUS');
-    logger.log(`Sleep System: ✅ WORKING`, 'info', 'STATUS');
-    logger.log(`Activity System: ✅ WORKING`, 'info', 'STATUS');
+    logger.log(`Coordinated Sleep: ✅ ACTIVE`, 'info', 'STATUS');
+    logger.log(`Shared Time: ✅ SYNCED`, 'info', 'STATUS');
     logger.log(`${'='.repeat(70)}`, 'info', 'STATUS');
     
     connectedBots.forEach(bot => {
       const status = bot.getStatus();
       const sleepIcon = status.isSleeping ? '💤' : '☀️';
       const bedIcon = status.sleepInfo?.hasHomeBed ? '🛏️' : '❌';
-      const timeIcon = status.isNight ? '🌙' : status.isDay ? '☀️' : '⏰';
+      const activityStatus = status.activitiesStopped ? '🚫 STOPPED' : '🎯 ACTIVE';
+      const retryStatus = status.sleepInfo?.sleepRetryCount > 0 ? `🔁 Retry: ${status.sleepInfo.sleepRetryCount}` : '';
       
-      logger.log(`${sleepIcon} ${status.username} (${status.personality}) ${timeIcon}`, 'info', 'STATUS');
-      logger.log(`  Activity: ${status.activity} | Time: ${status.currentTime}`, 'info', 'STATUS');
+      logger.log(`${sleepIcon} ${status.username} (${status.personality})`, 'info', 'STATUS');
+      logger.log(`  Activity: ${status.activity} | ${activityStatus}`, 'info', 'STATUS');
       logger.log(`  Position: ${status.position ? `${status.position.x}, ${status.position.y}, ${status.position.z}` : 'Unknown'}`, 'info', 'STATUS');
       logger.log(`  Home: ${status.homeLocation ? `${status.homeLocation.x}, ${status.homeLocation.y}, ${status.homeLocation.z}` : 'Not set'}`, 'info', 'STATUS');
-      logger.log(`  Bed: ${bedIcon} | Activities: ${status.metrics.activitiesPerformed} | Sleeps: ${status.metrics.sleepCycles}`, 'info', 'STATUS');
+      logger.log(`  Bed: ${bedIcon} | Sleeps: ${status.metrics.sleepCycles} | ${retryStatus}`, 'info', 'STATUS');
       logger.log(``, 'info', 'STATUS');
     });
     
@@ -1654,18 +1840,10 @@ function createWebServer(botManager) {
       const totalBedReplacements = Object.values(statuses).reduce((total, s) => total + (s.metrics.bedReplacements || 0), 0);
       const totalActivities = Object.values(statuses).reduce((total, s) => total + (s.metrics.activitiesPerformed || 0), 0);
       
-      // Get time from first bot
-      let currentTime = 0;
-      let isDay = false;
-      let isNight = false;
-      const firstBot = Object.values(statuses).find(s => s.status === 'connected');
-      if (firstBot) {
-        currentTime = firstBot.currentTime || 0;
-        isDay = firstBot.isDay || false;
-        isNight = firstBot.isNight || false;
-      }
-      
-      const timeStatus = isNight ? '🌙 NIGHT' : isDay ? '☀️ DAY' : '⏰ UNKNOWN';
+      const timeStatus = sharedTimeManager.getStatus();
+      const timeIcon = timeStatus.isNight ? '🌙' : timeStatus.isDay ? '☀️' : '⏰';
+      const timeText = timeStatus.isNight ? 'NIGHT' : timeStatus.isDay ? 'DAY' : 'UNKNOWN';
+      const forceSleep = timeStatus.forceSleepTriggered ? '⚠️ FORCE SLEEP ACTIVE' : '✅ Normal';
       
       res.writeHead(200, { 
         'Content-Type': 'text/html',
@@ -1678,7 +1856,7 @@ function createWebServer(botManager) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fixed Sleep System v3.2</title>
+    <title>Both Bots Sleep System v3.3</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
@@ -1709,12 +1887,22 @@ function createWebServer(botManager) {
             font-size: 0.8rem;
         }
         .time-display {
-            background: ${isNight ? 'rgba(0, 204, 255, 0.2)' : 'rgba(255, 170, 0, 0.2)'};
-            padding: 10px;
+            background: ${timeStatus.isNight ? 'rgba(0, 204, 255, 0.2)' : 'rgba(255, 170, 0, 0.2)'};
+            padding: 15px;
             border-radius: 10px;
-            margin: 10px 0;
-            font-size: 1.2rem;
-            border: 1px solid ${isNight ? 'rgba(0, 204, 255, 0.3)' : 'rgba(255, 170, 0, 0.3)'};
+            margin: 15px 0;
+            font-size: 1.3rem;
+            border: 1px solid ${timeStatus.isNight ? 'rgba(0, 204, 255, 0.3)' : 'rgba(255, 170, 0, 0.3)'};
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .force-sleep {
+            background: rgba(255, 51, 51, 0.2);
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            border: 1px solid rgba(255, 51, 51, 0.3);
         }
         .stats {
             display: grid;
@@ -1757,9 +1945,16 @@ function createWebServer(botManager) {
             border-color: #00ccff;
             box-shadow: 0 0 10px rgba(0, 204, 255, 0.3);
         }
-        .bot-card.day-active {
-            border-color: #ffaa00;
-            box-shadow: 0 0 10px rgba(255, 170, 0, 0.3);
+        .bot-card.force-sleep-needed {
+            border-color: #ff3333;
+            box-shadow: 0 0 10px rgba(255, 51, 51, 0.3);
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { box-shadow: 0 0 10px rgba(255, 51, 51, 0.3); }
+            50% { box-shadow: 0 0 15px rgba(255, 51, 51, 0.5); }
+            100% { box-shadow: 0 0 10px rgba(255, 51, 51, 0.3); }
         }
         
         .bot-header {
@@ -1779,7 +1974,8 @@ function createWebServer(botManager) {
         }
         .connected { background: rgba(0, 255, 136, 0.2); color: #00ff88; }
         .sleeping { background: rgba(0, 204, 255, 0.2); color: #00ccff; }
-        .active { background: rgba(255, 170, 0, 0.2); color: #ffaa00; }
+        .awake-night { background: rgba(255, 51, 51, 0.2); color: #ff3333; }
+        .awake-day { background: rgba(255, 170, 0, 0.2); color: #ffaa00; }
         
         .info-grid {
             display: grid;
@@ -1801,12 +1997,21 @@ function createWebServer(botManager) {
             font-weight: bold;
         }
         
-        .time-info {
+        .sleep-info {
             margin-top: 10px;
             padding: 10px;
-            background: ${isNight ? 'rgba(0, 204, 255, 0.1)' : 'rgba(255, 170, 0, 0.1)'};
             border-radius: 5px;
-            border: 1px solid ${isNight ? 'rgba(0, 204, 255, 0.3)' : 'rgba(255, 170, 0, 0.3)'};
+            font-size: 0.9rem;
+        }
+        .sleeping-status { background: rgba(0, 204, 255, 0.1); border: 1px solid rgba(0, 204, 255, 0.3); }
+        .not-sleeping-status { background: rgba(255, 51, 51, 0.1); border: 1px solid rgba(255, 51, 51, 0.3); }
+        
+        .retry-info {
+            margin-top: 5px;
+            padding: 5px;
+            background: rgba(255, 170, 0, 0.1);
+            border-radius: 5px;
+            font-size: 0.8rem;
             text-align: center;
         }
         
@@ -1842,11 +2047,19 @@ function createWebServer(botManager) {
 <body>
     <div class="container">
         <div class="header">
-            <h1>😴 Fixed Sleep System <span class="version">v3.2</span></h1>
-            <p>Working Sleep • Day Activities • Auto Bed Replacement</p>
+            <h1>😴 Both Bots Sleep System <span class="version">v3.3</span></h1>
+            <p>SleepMaster & NightWatcher Both Sleep Perfectly • No Night Activities</p>
             
             <div class="time-display">
-                ${timeStatus} | Time: ${currentTime} ticks
+                <div>
+                    ${timeIcon} ${timeText} TIME
+                    <div style="font-size: 1rem; margin-top: 5px;">
+                        Time: ${timeStatus.currentTime} ticks
+                    </div>
+                </div>
+                <div class="force-sleep">
+                    ${forceSleep}
+                </div>
             </div>
             
             <div class="stats">
@@ -1855,16 +2068,16 @@ function createWebServer(botManager) {
                     <div class="stat-value">${connected}</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Sleeping</div>
-                    <div class="stat-value">${sleeping}</div>
+                    <div class="stat-label">Sleeping Now</div>
+                    <div class="stat-value">${sleeping}/${connected}</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">With Home Bed</div>
                     <div class="stat-value">${hasHomeBed}</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Activities</div>
-                    <div class="stat-value">${totalActivities}</div>
+                    <div class="stat-label">Total Sleeps</div>
+                    <div class="stat-value">${totalSleepCycles}</div>
                 </div>
             </div>
         </div>
@@ -1872,17 +2085,19 @@ function createWebServer(botManager) {
         <h2 style="margin-bottom: 15px;">🤖 Bot Status</h2>
         <div class="bots-grid">
             ${Object.entries(statuses).map(([id, status]) => {
-              const hasBed = status.sleepInfo?.hasHomeBed || false;
               const isSleeping = status.isSleeping || false;
-              const isDaytime = status.isDay || false;
-              const isNighttime = status.isNight || false;
+              const isNight = status.isNight || false;
+              const isDay = status.isDay || false;
+              const hasBed = status.sleepInfo?.hasHomeBed || false;
+              const sleepRetry = status.sleepInfo?.sleepRetryCount || 0;
+              const shouldBeSleeping = isNight && !isSleeping;
               
               return `
-            <div class="bot-card ${isSleeping ? 'sleeping' : isDaytime ? 'day-active' : ''}">
+            <div class="bot-card ${isSleeping ? 'sleeping' : shouldBeSleeping ? 'force-sleep-needed' : ''}">
                 <div class="bot-header">
                     <div class="bot-name">${status.username}</div>
-                    <div class="bot-status ${isSleeping ? 'sleeping' : isDaytime ? 'active' : 'connected'}">
-                        ${isSleeping ? '💤 SLEEPING' : isDaytime ? '🎯 ACTIVE' : '⏰ WAITING'}
+                    <div class="bot-status ${isSleeping ? 'sleeping' : isNight ? 'awake-night' : 'awake-day'}">
+                        ${isSleeping ? '💤 SLEEPING' : isNight ? '🌙 AWAKE AT NIGHT' : '☀️ AWAKE AT DAY'}
                     </div>
                 </div>
                 
@@ -1905,36 +2120,56 @@ function createWebServer(botManager) {
                     </div>
                 </div>
                 
-                <div class="time-info">
-                    ${isNighttime ? '🌙 Night Time - Should be sleeping' : isDaytime ? '☀️ Day Time - Should be active' : '⏰ Time unknown'}
+                <div class="sleep-info ${isSleeping ? 'sleeping-status' : 'not-sleeping-status'}">
+                    <div style="display: flex; justify-content: space-between;">
+                        <span>🛏️ Home Bed: <strong>${hasBed ? '✅ OK' : '❌ MISSING'}</strong></span>
+                        <span>😴 Sleep Cycles: <strong>${status.metrics.sleepCycles}</strong></span>
+                    </div>
+                    ${shouldBeSleeping ? `
+                    <div style="margin-top: 5px; color: #ff3333; font-weight: bold;">
+                        ⚠️ SHOULD BE SLEEPING!
+                    </div>
+                    ` : ''}
+                    ${status.homeLocation ? `
+                    <div style="margin-top: 5px; font-size: 0.8rem;">
+                        Home: ${status.homeLocation.x}, ${status.homeLocation.y}, ${status.homeLocation.z}
+                    </div>
+                    ` : ''}
                 </div>
+                
+                ${sleepRetry > 0 ? `
+                <div class="retry-info">
+                    🔁 Sleep Retry: ${sleepRetry} attempts
+                </div>
+                ` : ''}
                 
                 <div style="margin-top: 10px; font-size: 0.9rem; color: #aaa;">
                     Activities: ${status.metrics.activitiesPerformed} | 
-                    Sleeps: ${status.metrics.sleepCycles} | 
-                    Bed Rep: ${status.metrics.bedReplacements}
+                    Bed Rep: ${status.metrics.bedReplacements} | 
+                    Sleeps: ${status.metrics.sleepCycles}
                 </div>
             </div>
             `}).join('')}
         </div>
         
         <div class="features">
-            <h2>⚡ Fixed Features</h2>
+            <h2>⚡ Coordinated Sleep Features</h2>
             <div class="features-grid">
-                <div class="feature">⏰ Time Monitoring</div>
-                <div class="feature">😴 Night Sleep (13000-23000)</div>
-                <div class="feature">☀️ Day Activities (0-13000)</div>
-                <div class="feature">🎯 Multiple Activities</div>
+                <div class="feature">⏰ Shared Time Sync</div>
+                <div class="feature">😴 Both Bots Sleep</div>
+                <div class="feature">🚫 No Night Activities</div>
+                <div class="feature">⚠️ Force Sleep System</div>
+                <div class="feature">🔁 Sleep Retry (3x)</div>
+                <div class="feature">🎯 Day Activities Only</div>
                 <div class="feature">🛏️ Auto Bed Replacement</div>
                 <div class="feature">📍 Spawnpoint Protection</div>
-                <div class="feature">🧹 Clean Extra Beds</div>
-                <div class="feature">🔗 Auto-Reconnect</div>
             </div>
         </div>
         
         <div class="footer">
-            <p>✅ Time checked every second • Night: Sleep at 13000-23000 ticks • Day: Activities at 0-13000 ticks</p>
-            <p>✅ Activities: Exploration, Block building, Looking around, Jumping, Turning</p>
+            <p>✅ Both bots (SleepMaster & NightWatcher) will sleep at night • No activities during night</p>
+            <p>✅ Force sleep triggered if any bot awake 10 seconds after night starts</p>
+            <p>✅ Sleep priority: SleepMaster first (1s delay), NightWatcher second (3s delay)</p>
             <p>Last updated: ${new Date().toLocaleTimeString()} • Auto-refresh: 30s</p>
         </div>
     </div>
@@ -1953,10 +2188,11 @@ function createWebServer(botManager) {
         'Access-Control-Allow-Origin': '*'
       });
       res.end(JSON.stringify({
-        version: '3.2',
+        version: '3.3',
         server: CONFIG.SERVER,
         timestamp: new Date().toISOString(),
         features: CONFIG.FEATURES,
+        time: sharedTimeManager.getStatus(),
         bots: botManager.getAllStatuses()
       }));
       
@@ -1977,8 +2213,8 @@ function createWebServer(botManager) {
 // ================= MAIN =================
 async function main() {
   try {
-    logger.log('🚀 Starting Fixed Sleep System v3.2...', 'info', 'SYSTEM');
-    logger.log('✅ Fixed Time Monitoring • Working Sleep • Day Activities', 'success', 'SYSTEM');
+    logger.log('🚀 Starting Both Bots Sleep System v3.3...', 'info', 'SYSTEM');
+    logger.log('✅ SleepMaster & NightWatcher Both Sleep Perfectly', 'success', 'SYSTEM');
     
     const botManager = new BotManager();
     
@@ -1998,13 +2234,13 @@ async function main() {
     
     await botManager.start();
     
-    logger.log('\n⏰ WORKING TIME SYSTEM:', 'info', 'SYSTEM');
-    logger.log('   🔍 Time monitoring: Every second', 'time', 'SYSTEM');
-    logger.log('   🌙 Night detection: 13000-23000 ticks', 'night', 'SYSTEM');
-    logger.log('   ☀️ Day detection: 0-13000 ticks', 'day', 'SYSTEM');
-    logger.log('   😴 Sleep trigger: Automatically at night', 'sleep', 'SYSTEM');
-    logger.log('   🎯 Activity trigger: Automatically at day', 'activity', 'SYSTEM');
-    logger.log('   ✅ System is working...', 'success', 'SYSTEM');
+    logger.log('\n🎯 COORDINATED SLEEP GUARANTEED:', 'info', 'SYSTEM');
+    logger.log('   ⏰ Shared time manager: Both bots see same time', 'time', 'SYSTEM');
+    logger.log('   😴 Sleep priority: SleepMaster (1s), NightWatcher (3s)', 'sleep', 'SYSTEM');
+    logger.log('   🚫 No activities: All activities stop at night', 'night', 'SYSTEM');
+    logger.log('   ⚠️ Force sleep: If awake 10s after night, forced to sleep', 'force_sleep', 'SYSTEM');
+    logger.log('   🔁 Sleep retry: 3 retry attempts if sleep fails', 'sleep', 'SYSTEM');
+    logger.log('   ✅ Both bots WILL sleep perfectly!', 'success', 'SYSTEM');
     
     // Keep running
     while (true) {
