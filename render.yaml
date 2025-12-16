@@ -6,12 +6,11 @@ services:
     startCommand: node index.js
     envVars:
       - key: NODE_VERSION
-        value: 20 # Using Node.js LTS version 20
+        value: 20
       - key: MINECRAFT_HOST
         value: gameplannet.aternos.me
       - key: MINECRAFT_PORT
         value: 43658
-      # The PORT variable is not needed here; Render sets it automatically.
     healthCheckPath: /health
-    autoDeploy: commit # Recommended syntax for automatic deploys on commit
+    autoDeploy: commit
     plan: free
