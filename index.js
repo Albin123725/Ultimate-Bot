@@ -119,7 +119,8 @@ class UltimateBot {
       port: CONFIG.SERVER.port,
       username: this.state.username,
       version: CONFIG.SERVER.version,
-      auth: 'mojang' // Default to mojang, update if needed
+      // *** FIX: Use 'offline' auth for cracked servers ***
+      auth: 'offline' 
     };
 
     try {
