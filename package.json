@@ -1,25 +1,18 @@
 {
   "name": "ultimate-minecraft-bot-v2.3",
   "version": "2.3.0",
-  "description": "Enhanced Minecraft Bot System with Perfect Sleep, Home System, Building, and Crash Protection.",
+  "description": "An advanced Mineflayer bot with building, home, and crash protection features.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "mineflayer": "^4.20.0",
-    "mineflayer-pathfinder": "^2.4.4",
+    "mineflayer-pathfinder": "^2.4.0",
+    "mineflayer-collectblock": "^1.4.0",
+    "mineflayer-auto-eat": "^3.0.0",
     "vec3": "^0.1.7",
-    "http": "0.0.1-security"
-  },
-  "keywords": [
-    "minecraft",
-    "mineflayer",
-    "bot",
-    "automation",
-    "creative",
-    "building"
-  ],
-  "author": "",
-  "license": "ISC"
+    "http": "0.0.1-security",
+    "minecraft-data": "^3.5.0"
+  }
 }
