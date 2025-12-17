@@ -9,8 +9,3 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 18.17.0
-    plans:
-      - name: free
-        cpu: 0.25
-        memory: 512MB
-        price: 0
