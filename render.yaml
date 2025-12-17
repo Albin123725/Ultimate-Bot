@@ -1,16 +1,16 @@
 services:
   - type: web
-    name: ultimate-minecraft-bots-fixed
+    name: craftman-bot
     env: node
     buildCommand: npm install
-    startCommand: node index.js
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: false
     envVars:
       - key: NODE_VERSION
-        value: 20
-      - key: MINECRAFT_HOST
-        value: gameplannet.aternos.me
-      - key: MINECRAFT_PORT
-        value: 43658
-    healthCheckPath: /health
-    autoDeploy: commit
-    plan: free
+        value: 18.17.0
+    plans:
+      - name: free
+        cpu: 0.25
+        memory: 512MB
+        price: 0
