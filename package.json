@@ -1,71 +1,20 @@
+
 {
-  "name": "ultimate-minecraft-bot-system",
-  "version": "2.5.0",
-  "description": "Ultimate Minecraft Bot System with Smart Sleep, Occupied Bed Handling, and Home System",
-  "main": "server.js",
+  "name": "craftman-bot",
+  "version": "2.0.0",
+  "description": "Minecraft 24/7 bot for Aternos server 1.21.10",
+  "main": "bot.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js",
-    "test": "echo \"No tests specified\" && exit 0",
-    "build": "echo \"No build step required\""
+    "start": "node bot.js",
+    "dev": "node bot.js"
   },
   "dependencies": {
-    "mineflayer": "^4.15.0",
-    "vec3": "^0.1.8"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.0"
+    "mineflayer": "^4.16.0",
+    "mineflayer-collectblock": "^1.4.2",
+    "mineflayer-pathfinder": "^2.4.5",
+    "minecraft-data": "^3.66.0"
   },
   "engines": {
     "node": ">=18.0.0"
-  },
-  "keywords": [
-    "minecraft",
-    "bot",
-    "creative",
-    "aternos",
-    "render",
-    "auto-sleep",
-    "home-system",
-    "occupied-bed",
-    "smart-sleep",
-    "emergency-sleep",
-    "minecraft-bot",
-    "automation",
-    "sleep-system",
-    "bed-management"
-  ],
-  "author": "Your Name",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/yourusername/ultimate-minecraft-bot-system.git"
-  },
-  "bugs": {
-    "url": "https://github.com/yourusername/ultimate-minecraft-bot-system/issues"
-  },
-  "homepage": "https://github.com/yourusername/ultimate-minecraft-bot-system#readme",
-  "contributors": [
-    "Your Name <your.email@example.com>"
-  ],
-  "files": [
-    "server.js",
-    "README.md",
-    "package.json"
-  ],
-  "publishConfig": {
-    "access": "public"
-  },
-  "bin": {
-    "minecraft-bot": "./server.js"
-  },
-  "os": [
-    "linux",
-    "darwin",
-    "win32"
-  ],
-  "cpu": [
-    "x64",
-    "arm64"
-  ]
+  }
 }
