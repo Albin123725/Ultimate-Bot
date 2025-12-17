@@ -1,12 +1,10 @@
-
 {
   "name": "craftman-bot",
   "version": "2.0.0",
   "description": "Minecraft 24/7 bot for Aternos server 1.21.10",
   "main": "bot.js",
   "scripts": {
-    "start": "node bot.js",
-    "dev": "node bot.js"
+    "start": "node bot.js"
   },
   "dependencies": {
     "mineflayer": "^4.16.0",
