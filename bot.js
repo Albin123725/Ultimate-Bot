@@ -61,7 +61,9 @@ function createBot() {
             bot.chat('Home location auto-set!');
             
             // Create a simple platform for bed
-            createBedPlatform();
+            setTimeout(() => {
+                createBedPlatform();
+            }, 2000);
         }
         
         ensureBedInInventory();
@@ -158,16 +160,10 @@ async function createBedPlatform() {
         for (let x = -1; x <= 1; x++) {
             for (let z = -1; z <= 1; z++) {
                 const blockPos = homeLocation.offset(x, -1, z).floored();
-                const currentBlock = bot.blockAt(blockPos);
                 
-                // Only place blocks if empty or replaceable
-                if (!currentBlock || currentBlock.boundingBox === 'empty' || 
-                    currentBlock.name.includes('grass') || currentBlock.name.includes('dirt')) {
-                    
-                    // Use stone or planks for platform
-                    bot.chat(`/setblock ${blockPos.x} ${blockPos.y} ${blockPos.z} stone`);
-                    await sleep(100);
-                }
+                // Use creative command to place platform
+                bot.chat(`/setblock ${blockPos.x} ${blockPos.y} ${blockPos.z} stone replace`);
+                await sleep(100);
             }
         }
         
@@ -196,7 +192,9 @@ function reconnectBot() {
     if (bot) {
         try {
             bot.end();
-        } catch (e) {}
+        } catch (e) {
+            // Ignore
+        }
     }
     setTimeout(createBot, 2000);
 }
@@ -224,15 +222,8 @@ function ensureBedInInventory() {
             console.log('No bed in inventory, giving one...');
             // Try different bed types
             const bedTypes = ['red_bed', 'white_bed', 'blue_bed', 'black_bed'];
-            for (const bedType of bedTypes) {
-                try {
-                    bot.chat(`/give @s ${bedType} 2`);
-                    console.log(`Requested ${bedType}`);
-                    break;
-                } catch (err) {
-                    continue;
-                }
-            }
+            bot.chat(`/give @s ${bedTypes[0]} 2`);
+            console.log(`Requested ${bedTypes[0]}`);
             
             setTimeout(() => {
                 const bedsCheck = bot.inventory.items().filter(item => 
@@ -286,25 +277,7 @@ async function ensureBedAtHome() {
         
         if (existingBed) {
             console.log(`Found existing bed at ${existingBed.pos}`);
-            
-            // Check if bed is usable
-            try {
-                // Try to look at bed
-                await bot.lookAt(existingBed.pos.plus(new mineflayer.Vec3(0.5, 0, 0.5)));
-                
-                // Check if we can interact with it
-                const referenceBlock = bot.blockAt(existingBed.pos);
-                if (referenceBlock && referenceBlock.name.includes('_bed')) {
-                    console.log('Existing bed appears usable');
-                    return true;
-                }
-            } catch (err) {
-                console.log(`Existing bed might be obstructed: ${err.message}`);
-                // Destroy and replace
-                await destroyBlock(existingBed.pos);
-                await sleep(1000);
-                return placeBedSimple();
-            }
+            return true;
         } else {
             console.log('No existing bed found, placing new one...');
             return placeBedSimple();
@@ -336,60 +309,47 @@ async function placeBedSimple() {
         
         const bedItem = beds[0];
         
-        // Try to place bed at home position (or slightly offset)
-        const bedPositions = [
-            homeLocation.floored(),
-            homeLocation.floored().offset(0, 0, 1),
-            homeLocation.floored().offset(1, 0, 0),
-            homeLocation.floored().offset(0, 0, -1),
-            homeLocation.floored().offset(-1, 0, 0)
-        ];
+        // Try to place bed at home position
+        const bedPos = homeLocation.floored();
         
-        for (const bedPos of bedPositions) {
-            try {
-                console.log(`Trying to place bed at ${bedPos}...`);
-                
-                // Check if position is suitable
-                const blockBelow = bot.blockAt(bedPos.offset(0, -1, 0));
-                const blockAtPos = bot.blockAt(bedPos);
-                
-                if (blockBelow && blockBelow.boundingBox === 'block' && 
-                    (!blockAtPos || blockAtPos.boundingBox === 'empty')) {
-                    
-                    // Use creative command to place bed directly
-                    console.log(`Using setblock command for bed at ${bedPos.x} ${bedPos.y} ${bedPos.z}`);
-                    bot.chat(`/setblock ${bedPos.x} ${bedPos.y} ${bedPos.z} ${bedItem.name} replace`);
-                    
-                    console.log(`Bed placed at: ${bedPos}`);
-                    
-                    // Ensure we still have a bed in inventory
+        try {
+            console.log(`Placing bed at ${bedPos}...`);
+            
+            // Use creative command to place bed directly
+            bot.chat(`/setblock ${bedPos.x} ${bedPos.y} ${bedPos.z} ${bedItem.name} replace`);
+            
+            console.log(`Bed placed at: ${bedPos}`);
+            
+            // Ensure we still have a bed in inventory
+            setTimeout(ensureBedInInventory, 1000);
+            
+            return true;
+            
+        } catch (err) {
+            console.log(`Failed to place bed: ${err.message}`);
+            
+            // Try alternative positions
+            const altPositions = [
+                bedPos.offset(1, 0, 0),
+                bedPos.offset(0, 0, 1),
+                bedPos.offset(-1, 0, 0),
+                bedPos.offset(0, 0, -1)
+            ];
+            
+            for (const altPos of altPositions) {
+                try {
+                    bot.chat(`/setblock ${altPos.x} ${altPos.y} ${altPos.z} ${bedItem.name} replace`);
+                    console.log(`Bed placed at alternative position: ${altPos}`);
                     setTimeout(ensureBedInInventory, 1000);
-                    
                     return true;
-                } else {
-                    console.log(`Position ${bedPos} not suitable: below=${blockBelow?.name}, at=${blockAtPos?.name}`);
-                    
-                    // If blocked, clear the space
-                    if (blockAtPos && blockAtPos.boundingBox === 'block') {
-                        bot.chat(`/setblock ${bedPos.x} ${bedPos.y} ${bedPos.z} air replace`);
-                        await sleep(500);
-                        
-                        // Try placing bed again
-                        bot.chat(`/setblock ${bedPos.x} ${bedPos.y} ${bedPos.z} ${bedItem.name} replace`);
-                        console.log(`Cleared and placed bed at: ${bedPos}`);
-                        
-                        setTimeout(ensureBedInInventory, 1000);
-                        return true;
-                    }
+                } catch (altErr) {
+                    console.log(`Failed at ${altPos}: ${altErr.message}`);
                 }
-            } catch (err) {
-                console.log(`Failed to place bed at ${bedPos}: ${err.message}`);
-                continue;
             }
+            
+            console.log('Could not place bed at any position');
+            return false;
         }
-        
-        console.log('Could not place bed at any position');
-        return false;
         
     } catch (err) {
         console.log(`Error in placeBedSimple: ${err.message}`);
@@ -399,8 +359,7 @@ async function placeBedSimple() {
 
 async function destroyBlock(position) {
     try {
-        console.log(`Attempting to destroy block at ${position}`);
-        // Use setblock air for creative mode
+        console.log(`Destroying block at ${position}`);
         bot.chat(`/setblock ${position.x} ${position.y} ${position.z} air replace`);
         console.log(`Destroyed block at: ${position}`);
         return true;
@@ -423,9 +382,8 @@ async function goToHomeAndSleep() {
         movements.allowParkour = false;
         bot.pathfinder.setMovements(movements);
         
-        // Go to home (slightly above to avoid getting stuck)
-        const goalPos = homeLocation.offset(0, 1, 0);
-        const goal = new goals.GoalNear(goalPos.x, goalPos.y, goalPos.z, 2);
+        // Go to home
+        const goal = new goals.GoalNear(homeLocation.x, homeLocation.y, homeLocation.z, 2);
         bot.pathfinder.setGoal(goal);
         
         // Wait for arrival
@@ -449,9 +407,6 @@ async function goToHomeAndSleep() {
                 resolve();
             }, 30000);
         });
-        
-        // Ensure we're at the right position
-        await bot.lookAt(homeLocation);
         
         // Ensure bed exists
         await ensureBedAtHome();
@@ -613,4 +568,69 @@ async function performDayActivity() {
     
     try {
         // Check time
-        cons
+        const timeOfDay = bot.time ? bot.time.timeOfDay : 0;
+        const isNight = timeOfDay >= 13000 && timeOfDay <= 23000;
+        
+        if (isNight) {
+            console.log('Night falling, stopping activities...');
+            isActive = false;
+            return;
+        }
+        
+        // Simple activities
+        console.log('Performing day activity...');
+        
+        // Just look around slowly
+        const yaw = Math.random() * Math.PI * 2;
+        const pitch = -0.3 + Math.random() * 0.6;
+        await bot.look(yaw, pitch);
+        
+        // Schedule next activity
+        if (isActive && !isSleeping) {
+            setTimeout(performDayActivity, 15000 + Math.random() * 15000);
+        }
+        
+    } catch (err) {
+        console.log(`Error in day activity: ${err.message}`);
+        if (isActive && !isSleeping) {
+            setTimeout(performDayActivity, 10000);
+        }
+    }
+}
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Start the bot
+createBot();
+
+// Handle process signals
+process.on('unhandledRejection', (err) => {
+    console.error('Unhandled rejection:', err);
+});
+
+process.on('SIGINT', () => {
+    console.log('Shutting down...');
+    cleanup();
+    if (bot) {
+        bot.end();
+    }
+    process.exit();
+});
+
+console.log('========================================');
+console.log('CraftMan Bot - Enhanced Bed System');
+console.log('Server: gameplannet.aternos.me:43658');
+console.log('========================================');
+console.log('\nFeatures:');
+console.log('1. Creates platform for bed placement');
+console.log('2. Uses /setblock for reliable bed placement');
+console.log('3. Better bed detection and management');
+console.log('4. Improved sleep logic');
+console.log('\nCommands in chat:');
+console.log('- "sethome craftman" - Set home location');
+console.log('- "platform craftman" - Create bed platform');
+console.log('- "sleep craftman" - Force sleep');
+console.log('- "debug craftman" - Show bot status');
+console.log('========================================');
