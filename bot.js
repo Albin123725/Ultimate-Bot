@@ -8,8 +8,8 @@ const config = {
     host: 'gameplannet.aternos.me',
     port: 43658,
     username: 'CraftMan',
-    version: '1.21.1', // Aternos likely uses 1.21.1
-    auth: 'offline' // For cracked server
+    version: '1.21.1',
+    auth: 'offline'
 };
 
 // Home location
@@ -17,7 +17,7 @@ let homeLocation = null;
 let isSleeping = false;
 let bot = null;
 let reconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 50; // Higher for Render
+const MAX_RECONNECT_ATTEMPTS = 50;
 let activityInterval = null;
 let isActive = false;
 
@@ -31,25 +31,21 @@ function createBot() {
         username: config.username,
         version: config.version,
         auth: config.auth,
-        checkTimeoutInterval: 60000, // Increase timeout for Aternos
+        checkTimeoutInterval: 60000,
         hideErrors: false
     });
 
-    // Load plugins
     bot.loadPlugin(pathfinder);
     bot.loadPlugin(collectBlock);
 
-    // Bot event handlers
     bot.on('login', () => {
         console.log(`[${new Date().toLocaleTimeString()}] Bot logged in as ${bot.username}`);
         reconnectAttempts = 0;
         
-        // Request OP
         setTimeout(() => {
             bot.chat('/op ' + bot.username);
         }, 5000);
         
-        // Set to creative mode
         setTimeout(() => {
             bot.chat('/gamemode creative');
             console.log('Set to creative mode');
@@ -63,24 +59,18 @@ function createBot() {
             homeLocation = bot.entity.position.clone();
             console.log(`Home location auto-set to: ${homeLocation}`);
             bot.chat('Home location auto-set!');
+            
+            // Create a simple platform for bed
+            createBedPlatform();
         }
         
-        // Make sure bot has bed in inventory
         ensureBedInInventory();
-        
-        // Start monitoring
         startMonitoring();
         console.log('Bot is now active!');
     });
 
     bot.on('time', () => {
         checkTimeAndSleep();
-    });
-
-    bot.on('playerCollect', (collector, collected) => {
-        if (collector === bot.entity) {
-            console.log(`Collected: ${collected.name}`);
-        }
     });
 
     bot.on('death', () => {
@@ -118,7 +108,7 @@ function createBot() {
         
         if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
             reconnectAttempts++;
-            const delay = Math.min(10000 * reconnectAttempts, 60000); // Exponential backoff
+            const delay = Math.min(10000 * reconnectAttempts, 60000);
             console.log(`Reconnecting in ${delay/1000} seconds... Attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}`);
             setTimeout(reconnectBot, delay);
         } else {
@@ -130,32 +120,67 @@ function createBot() {
         }
     });
 
-    // Chat handler
     bot.on('message', (message) => {
         const msg = message.toString();
         const cleanMsg = msg.toLowerCase();
         
-        // Log all chat
         console.log(`Chat: ${msg}`);
         
-        // Set home location via command
         if (cleanMsg.includes('sethome') && cleanMsg.includes('craftman')) {
             setHomeLocation();
         }
         
-        // Manual sleep command
         if (cleanMsg.includes('sleep') && cleanMsg.includes('craftman')) {
             goToHomeAndSleep();
         }
         
-        // Debug commands
         if (cleanMsg.includes('debug') && cleanMsg.includes('craftman')) {
             bot.chat(`Position: ${bot.entity.position}, Time: ${bot.time.timeOfDay}, Sleeping: ${isSleeping}`);
+        }
+        
+        if (cleanMsg.includes('platform') && cleanMsg.includes('craftman')) {
+            createBedPlatform();
         }
     });
 }
 
-// Cleanup function
+// Create a platform for bed placement
+async function createBedPlatform() {
+    if (!bot || !homeLocation) return;
+    
+    console.log('Creating bed platform...');
+    
+    try {
+        const platformSize = 3;
+        const platformY = Math.floor(homeLocation.y);
+        
+        // Create a 3x3 platform
+        for (let x = -1; x <= 1; x++) {
+            for (let z = -1; z <= 1; z++) {
+                const blockPos = homeLocation.offset(x, -1, z).floored();
+                const currentBlock = bot.blockAt(blockPos);
+                
+                // Only place blocks if empty or replaceable
+                if (!currentBlock || currentBlock.boundingBox === 'empty' || 
+                    currentBlock.name.includes('grass') || currentBlock.name.includes('dirt')) {
+                    
+                    // Use stone or planks for platform
+                    bot.chat(`/setblock ${blockPos.x} ${blockPos.y} ${blockPos.z} stone`);
+                    await sleep(100);
+                }
+            }
+        }
+        
+        console.log('Bed platform created!');
+        
+        // Ensure bed is placed on platform
+        setTimeout(ensureBedAtHome, 1000);
+        
+    } catch (err) {
+        console.log(`Error creating platform: ${err.message}`);
+    }
+}
+
 function cleanup() {
     if (activityInterval) {
         clearInterval(activityInterval);
@@ -165,191 +190,226 @@ function cleanup() {
     isSleeping = false;
 }
 
-// Reconnect function
 function reconnectBot() {
     console.log(`[${new Date().toLocaleTimeString()}] Attempting to reconnect...`);
     cleanup();
     if (bot) {
         try {
             bot.end();
-        } catch (e) {
-            // Ignore errors during cleanup
-        }
+        } catch (e) {}
     }
     setTimeout(createBot, 2000);
 }
 
-// Set home location
 function setHomeLocation() {
     if (bot && bot.entity) {
         homeLocation = bot.entity.position.clone();
         console.log(`Home location set to: ${homeLocation}`);
-        bot.chat('Home location set!');
+        bot.chat('Home location set! Creating platform...');
         
-        // Ensure bed at home
-        setTimeout(() => {
-            ensureBedAtHome();
-        }, 1000);
+        createBedPlatform();
     }
 }
 
-// Ensure bed in inventory
 function ensureBedInInventory() {
     if (!bot) return;
     
     try {
-        const bedItem = mcData(bot.version).itemsByName.red_bed || 
-                       mcData(bot.version).itemsByName.bed;
+        // Get any type of bed
+        const beds = bot.inventory.items().filter(item => 
+            item.name && item.name.includes('_bed')
+        );
         
-        if (bedItem) {
-            const beds = bot.inventory.items().filter(item => 
-                item.name.includes('bed')
-            );
-            
-            if (beds.length === 0) {
-                console.log('No bed in inventory, requesting one...');
-                bot.chat('/give @s red_bed 1');
-                setTimeout(() => {
-                    // Check again
-                    const bedsCheck = bot.inventory.items().filter(item => 
-                        item.name.includes('bed')
-                    );
-                    console.log(`Beds in inventory after request: ${bedsCheck.length}`);
-                }, 2000);
-            } else {
-                console.log(`Beds in inventory: ${beds.length}`);
+        if (beds.length === 0) {
+            console.log('No bed in inventory, giving one...');
+            // Try different bed types
+            const bedTypes = ['red_bed', 'white_bed', 'blue_bed', 'black_bed'];
+            for (const bedType of bedTypes) {
+                try {
+                    bot.chat(`/give @s ${bedType} 2`);
+                    console.log(`Requested ${bedType}`);
+                    break;
+                } catch (err) {
+                    continue;
+                }
             }
+            
+            setTimeout(() => {
+                const bedsCheck = bot.inventory.items().filter(item => 
+                    item.name && item.name.includes('_bed')
+                );
+                console.log(`Beds in inventory after request: ${bedsCheck.length}`);
+            }, 2000);
+        } else {
+            console.log(`Beds in inventory: ${beds.length}`);
         }
     } catch (err) {
         console.log(`Error checking inventory: ${err.message}`);
     }
 }
 
-// Ensure bed at home
 async function ensureBedAtHome() {
     if (!homeLocation || !bot) return;
     
+    console.log('Ensuring bed at home...');
+    
     try {
-        // Find beds near home (radius 4 blocks)
-        const bedsNearHome = [];
-        const radius = 4;
+        // First check if we have a bed in inventory
+        const bedsInInventory = bot.inventory.items().filter(item => 
+            item.name && item.name.includes('_bed')
+        );
+        
+        if (bedsInInventory.length === 0) {
+            console.log('No beds in inventory, getting one...');
+            ensureBedInInventory();
+            await sleep(2000);
+        }
+        
+        // Find existing beds near home
+        const radius = 5;
+        let existingBed = null;
         
         for (let x = -radius; x <= radius; x++) {
             for (let y = -2; y <= 2; y++) {
                 for (let z = -radius; z <= radius; z++) {
-                    const block = bot.blockAt(homeLocation.offset(x, y, z));
-                    if (block && block.name && block.name.includes('bed')) {
-                        bedsNearHome.push(block);
+                    const pos = homeLocation.offset(x, y, z);
+                    const block = bot.blockAt(pos);
+                    if (block && block.name && block.name.includes('_bed')) {
+                        existingBed = { block, pos };
+                        break;
                     }
                 }
+                if (existingBed) break;
             }
+            if (existingBed) break;
         }
         
-        console.log(`Found ${bedsNearHome.length} beds near home`);
-        
-        // Destroy extra beds (keep only one)
-        if (bedsNearHome.length > 1) {
-            for (let i = 1; i < bedsNearHome.length; i++) {
-                try {
-                    await destroyBlock(bedsNearHome[i].position);
-                    await sleep(500); // Delay between destruction
-                } catch (err) {
-                    console.log(`Could not destroy bed: ${err.message}`);
+        if (existingBed) {
+            console.log(`Found existing bed at ${existingBed.pos}`);
+            
+            // Check if bed is usable
+            try {
+                // Try to look at bed
+                await bot.lookAt(existingBed.pos.plus(new mineflayer.Vec3(0.5, 0, 0.5)));
+                
+                // Check if we can interact with it
+                const referenceBlock = bot.blockAt(existingBed.pos);
+                if (referenceBlock && referenceBlock.name.includes('_bed')) {
+                    console.log('Existing bed appears usable');
+                    return true;
                 }
+            } catch (err) {
+                console.log(`Existing bed might be obstructed: ${err.message}`);
+                // Destroy and replace
+                await destroyBlock(existingBed.pos);
+                await sleep(1000);
+                return placeBedSimple();
             }
-        }
-        
-        // Place bed if none found
-        if (bedsNearHome.length === 0) {
-            await placeBedAtHome();
+        } else {
+            console.log('No existing bed found, placing new one...');
+            return placeBedSimple();
         }
         
     } catch (err) {
         console.log(`Error in ensureBedAtHome: ${err.message}`);
+        return false;
     }
 }
 
-// Place bed at perfect location
-async function placeBedAtHome() {
-    if (!homeLocation || !bot) return false;
+// Simple bed placement at exact home location
+async function placeBedSimple() {
+    if (!bot || !homeLocation) return false;
+    
+    console.log('Placing bed using simple method...');
     
     try {
-        // Find suitable location near home (prefer positions at same Y level)
-        const possibleLocations = [
-            homeLocation.offset(1, 0, 0),
-            homeLocation.offset(-1, 0, 0),
-            homeLocation.offset(0, 0, 1),
-            homeLocation.offset(0, 0, -1),
-            homeLocation.offset(1, 0, 1),
-            homeLocation.offset(-1, 0, -1)
+        // Get bed from inventory
+        const beds = bot.inventory.items().filter(item => 
+            item.name && item.name.includes('_bed')
+        );
+        
+        if (beds.length === 0) {
+            console.log('No bed in inventory for placement');
+            ensureBedInInventory();
+            return false;
+        }
+        
+        const bedItem = beds[0];
+        
+        // Try to place bed at home position (or slightly offset)
+        const bedPositions = [
+            homeLocation.floored(),
+            homeLocation.floored().offset(0, 0, 1),
+            homeLocation.floored().offset(1, 0, 0),
+            homeLocation.floored().offset(0, 0, -1),
+            homeLocation.floored().offset(-1, 0, 0)
         ];
         
-        for (const loc of possibleLocations) {
-            const floorLoc = loc.clone().floored();
-            const blockBelow = bot.blockAt(floorLoc.offset(0, -1, 0));
-            const blockAtPos = bot.blockAt(floorLoc);
-            
-            // Check if position is suitable
-            if (blockBelow && blockBelow.boundingBox === 'block' && 
-                (!blockAtPos || blockAtPos.boundingBox === 'empty')) {
+        for (const bedPos of bedPositions) {
+            try {
+                console.log(`Trying to place bed at ${bedPos}...`);
                 
-                // Get bed from inventory
-                const bedItem = bot.inventory.items().find(item => 
-                    item.name.includes('bed')
-                );
+                // Check if position is suitable
+                const blockBelow = bot.blockAt(bedPos.offset(0, -1, 0));
+                const blockAtPos = bot.blockAt(bedPos);
                 
-                if (bedItem) {
-                    try {
-                        // Equip bed
-                        await bot.equip(bedItem, 'hand');
-                        
-                        // Look at position
-                        await bot.lookAt(floorLoc.plus(new mineflayer.Vec3(0.5, 0, 0.5)));
-                        
-                        // Small delay
+                if (blockBelow && blockBelow.boundingBox === 'block' && 
+                    (!blockAtPos || blockAtPos.boundingBox === 'empty')) {
+                    
+                    // Use creative command to place bed directly
+                    console.log(`Using setblock command for bed at ${bedPos.x} ${bedPos.y} ${bedPos.z}`);
+                    bot.chat(`/setblock ${bedPos.x} ${bedPos.y} ${bedPos.z} ${bedItem.name} replace`);
+                    
+                    console.log(`Bed placed at: ${bedPos}`);
+                    
+                    // Ensure we still have a bed in inventory
+                    setTimeout(ensureBedInInventory, 1000);
+                    
+                    return true;
+                } else {
+                    console.log(`Position ${bedPos} not suitable: below=${blockBelow?.name}, at=${blockAtPos?.name}`);
+                    
+                    // If blocked, clear the space
+                    if (blockAtPos && blockAtPos.boundingBox === 'block') {
+                        bot.chat(`/setblock ${bedPos.x} ${bedPos.y} ${bedPos.z} air replace`);
                         await sleep(500);
                         
-                        // Place bed
-                        await bot.placeBlock(bot.blockAt(floorLoc), new mineflayer.Vec3(0, 1, 0));
-                        console.log(`Bed placed at: ${floorLoc}`);
+                        // Try placing bed again
+                        bot.chat(`/setblock ${bedPos.x} ${bedPos.y} ${bedPos.z} ${bedItem.name} replace`);
+                        console.log(`Cleared and placed bed at: ${bedPos}`);
                         
-                        // Get another bed for inventory
                         setTimeout(ensureBedInInventory, 1000);
-                        
                         return true;
-                    } catch (placeErr) {
-                        console.log(`Failed to place bed at ${floorLoc}: ${placeErr.message}`);
-                        continue; // Try next location
                     }
                 }
+            } catch (err) {
+                console.log(`Failed to place bed at ${bedPos}: ${err.message}`);
+                continue;
             }
         }
         
-        console.log('Could not find suitable location for bed');
+        console.log('Could not place bed at any position');
         return false;
         
     } catch (err) {
-        console.log(`Error placing bed: ${err.message}`);
+        console.log(`Error in placeBedSimple: ${err.message}`);
         return false;
     }
 }
 
-// Destroy block
 async function destroyBlock(position) {
     try {
-        const block = bot.blockAt(position);
-        if (block && block.diggable) {
-            await bot.dig(block);
-            console.log(`Destroyed block at: ${position}`);
-            return true;
-        }
+        console.log(`Attempting to destroy block at ${position}`);
+        // Use setblock air for creative mode
+        bot.chat(`/setblock ${position.x} ${position.y} ${position.z} air replace`);
+        console.log(`Destroyed block at: ${position}`);
+        return true;
     } catch (err) {
         console.log(`Failed to destroy block: ${err.message}`);
+        return false;
     }
-    return false;
 }
 
-// Go to home and sleep
 async function goToHomeAndSleep() {
     if (!homeLocation || !bot || isSleeping) return;
     
@@ -363,35 +423,38 @@ async function goToHomeAndSleep() {
         movements.allowParkour = false;
         bot.pathfinder.setMovements(movements);
         
-        // Go to home
-        const goal = new goals.GoalNear(homeLocation.x, homeLocation.y, homeLocation.z, 2);
+        // Go to home (slightly above to avoid getting stuck)
+        const goalPos = homeLocation.offset(0, 1, 0);
+        const goal = new goals.GoalNear(goalPos.x, goalPos.y, goalPos.z, 2);
         bot.pathfinder.setGoal(goal);
         
-        // Wait until reached or timeout
-        await Promise.race([
-            new Promise(resolve => {
-                const checkInterval = setInterval(() => {
-                    if (!bot.entity) {
-                        clearInterval(checkInterval);
-                        resolve();
-                        return;
-                    }
-                    
-                    const distance = bot.entity.position.distanceTo(homeLocation);
-                    if (distance < 3) {
-                        clearInterval(checkInterval);
-                        resolve();
-                    }
-                }, 500);
-                
-                // Timeout after 30 seconds
-                setTimeout(() => {
+        // Wait for arrival
+        await new Promise(resolve => {
+            const checkInterval = setInterval(() => {
+                if (!bot.entity) {
                     clearInterval(checkInterval);
                     resolve();
-                }, 30000);
-            }),
-            sleep(30000) // Max 30 seconds to reach home
-        ]);
+                    return;
+                }
+                
+                const distance = bot.entity.position.distanceTo(homeLocation);
+                if (distance < 4) {
+                    clearInterval(checkInterval);
+                    resolve();
+                }
+            }, 500);
+            
+            setTimeout(() => {
+                clearInterval(checkInterval);
+                resolve();
+            }, 30000);
+        });
+        
+        // Ensure we're at the right position
+        await bot.lookAt(homeLocation);
+        
+        // Ensure bed exists
+        await ensureBedAtHome();
         
         // Try to sleep
         await trySleep();
@@ -401,78 +464,88 @@ async function goToHomeAndSleep() {
     }
 }
 
-// Try to sleep
 async function trySleep() {
     if (isSleeping || !bot || !homeLocation) return;
     
     console.log('Attempting to sleep...');
     
     try {
-        // First ensure we have a bed at home
-        await ensureBedAtHome();
+        // First ensure bed is at home
+        if (!await ensureBedAtHome()) {
+            console.log('Failed to ensure bed at home');
+            return false;
+        }
         
         // Find bed near home
-        const radius = 4;
-        let bedFound = null;
+        const radius = 5;
+        let bedBlock = null;
         
         for (let x = -radius; x <= radius; x++) {
-            for (let y = -1; y <= 2; y++) {
+            for (let y = -1; y <= 1; y++) {
                 for (let z = -radius; z <= radius; z++) {
-                    const block = bot.blockAt(homeLocation.offset(x, y, z));
-                    if (block && block.name && block.name.includes('bed')) {
-                        bedFound = block;
+                    const pos = homeLocation.offset(x, y, z);
+                    const block = bot.blockAt(pos);
+                    if (block && block.name && block.name.includes('_bed')) {
+                        bedBlock = block;
                         break;
                     }
                 }
-                if (bedFound) break;
+                if (bedBlock) break;
             }
-            if (bedFound) break;
+            if (bedBlock) break;
         }
         
-        if (bedFound) {
-            try {
-                console.log(`Found bed at ${bedFound.position}, attempting to sleep...`);
-                await bot.sleep(bedFound);
-                isSleeping = true;
-                console.log('Successfully sleeping!');
-                
-                // Set up wake check
-                const wakeCheck = setInterval(() => {
-                    if (!bot.isSleeping) {
-                        clearInterval(wakeCheck);
-                        isSleeping = false;
-                        console.log('Woke up!');
-                        startDayActivities();
-                    }
-                }, 5000);
-                
-                return true;
-            } catch (sleepErr) {
-                console.log(`Cannot sleep: ${sleepErr.message}`);
-                
-                // If bed is occupied or obstructed
-                if (sleepErr.message.includes('occupied') || 
-                    sleepErr.message.includes('obstructed') ||
-                    sleepErr.message.includes('not valid')) {
-                    
-                    console.log('Bed issue detected, placing new bed...');
-                    
-                    // Destroy problematic bed
-                    await destroyBlock(bedFound.position);
-                    await sleep(1000);
-                    
-                    // Place new bed
-                    if (await placeBedAtHome()) {
-                        return trySleep(); // Try again
+        if (!bedBlock) {
+            console.log('No bed found after ensureBedAtHome');
+            return false;
+        }
+        
+        console.log(`Found bed at ${bedBlock.position}, attempting to sleep...`);
+        
+        // Move to bed position
+        const bedStandPos = bedBlock.position.offset(0.5, 0, 0.5);
+        await bot.lookAt(bedStandPos);
+        
+        // Try to sleep
+        try {
+            await bot.sleep(bedBlock);
+            isSleeping = true;
+            console.log('Successfully sleeping!');
+            
+            // Set up wake check
+            const wakeCheck = setInterval(() => {
+                if (!bot || !bot.isSleeping) {
+                    clearInterval(wakeCheck);
+                    isSleeping = false;
+                    console.log('Woke up!');
+                    if (bot && bot.time) {
+                        const timeOfDay = bot.time.timeOfDay;
+                        const isNight = timeOfDay >= 13000 && timeOfDay <= 23000;
+                        if (!isNight) {
+                            startDayActivities();
+                        }
                     }
                 }
-            }
-        } else {
-            console.log('No bed found, placing one...');
-            if (await placeBedAtHome()) {
-                return trySleep(); // Try again
+            }, 5000);
+            
+            return true;
+            
+        } catch (sleepErr) {
+            console.log(`Cannot sleep in bed: ${sleepErr.message}`);
+            
+            // Bed might be obstructed or occupied
+            console.log('Bed issue, replacing...');
+            await destroyBlock(bedBlock.position);
+            await sleep(1000);
+            
+            // Place new bed
+            if (await placeBedSimple()) {
+                console.log('New bed placed, retrying sleep...');
+                await sleep(1000);
+                return trySleep();
             }
         }
+        
     } catch (err) {
         console.log(`Error in trySleep: ${err.message}`);
     }
@@ -480,16 +553,13 @@ async function trySleep() {
     return false;
 }
 
-// Start monitoring
 function startMonitoring() {
-    // Clear existing interval
     if (activityInterval) {
         clearInterval(activityInterval);
     }
     
-    // Monitor time every 10 seconds
     activityInterval = setInterval(() => {
-        if (bot && bot.entity) {
+        if (bot && bot.entity && bot.time) {
             checkTimeAndSleep();
         }
     }, 10000);
@@ -507,37 +577,34 @@ function startMonitoring() {
     }, 5000);
 }
 
-// Check time and sleep
 function checkTimeAndSleep() {
     if (!bot || !bot.time || isSleeping) return;
     
     const timeOfDay = bot.time.timeOfDay;
     const isNight = timeOfDay >= 13000 && timeOfDay <= 23000;
     
+    console.log(`Time check: ${timeOfDay}, Is night: ${isNight}, Is sleeping: ${isSleeping}`);
+    
     if (isNight && !isSleeping) {
         console.log(`Night detected (time: ${timeOfDay}), going to sleep...`);
         goToHomeAndSleep();
     } else if (timeOfDay < 13000 && isSleeping) {
-        // Wake up if sleeping during day
         if (bot.isSleeping) {
             bot.wake();
             isSleeping = false;
             console.log('Daytime, waking up!');
+            startDayActivities();
         }
     }
 }
 
-// Day activities
 function startDayActivities() {
-    if (!bot || !homeLocation || isActive) return;
+    if (!bot || !homeLocation || isActive || isSleeping) return;
     
     console.log('Starting day activities...');
     isActive = true;
     
-    // Stop any existing pathfinding
     bot.pathfinder.setGoal(null);
-    
-    // Simple patrol pattern around home
     performDayActivity();
 }
 
@@ -545,111 +612,5 @@ async function performDayActivity() {
     if (!bot || !homeLocation || !isActive || isSleeping) return;
     
     try {
-        // Check if it's still day
-        const timeOfDay = bot.time ? bot.time.timeOfDay : 0;
-        const isNight = timeOfDay >= 13000 && timeOfDay <= 23000;
-        
-        if (isNight) {
-            console.log('Night falling, stopping activities...');
-            isActive = false;
-            return;
-        }
-        
-        // Random activity
-        const activity = Math.floor(Math.random() * 3);
-        
-        switch (activity) {
-            case 0:
-                // Stay near home
-                console.log('Activity: Staying near home');
-                break;
-                
-            case 1:
-                // Look around
-                console.log('Activity: Looking around');
-                const yaw = Math.random() * Math.PI * 2;
-                const pitch = Math.random() * Math.PI - Math.PI / 2;
-                await bot.look(yaw, pitch);
-                break;
-                
-            case 2:
-                // Move to random nearby position
-                console.log('Activity: Exploring nearby');
-                if (bot.entity) {
-                    const movements = new Movements(bot, mcData(bot.version));
-                    movements.canDig = false;
-                    bot.pathfinder.setMovements(movements);
-                    
-                    const randomX = homeLocation.x + (Math.random() * 10 - 5);
-                    const randomZ = homeLocation.z + (Math.random() * 10 - 5);
-                    const goal = new goals.GoalNear(randomX, homeLocation.y, randomZ, 3);
-                    
-                    bot.pathfinder.setGoal(goal, () => {
-                        // When reached, schedule next activity
-                        if (isActive && !isSleeping) {
-                            setTimeout(performDayActivity, 5000 + Math.random() * 10000);
-                        }
-                    });
-                    
-                    // Timeout for this movement
-                    setTimeout(() => {
-                        if (isActive && !isSleeping) {
-                            bot.pathfinder.setGoal(null);
-                            setTimeout(performDayActivity, 5000);
-                        }
-                    }, 15000);
-                    
-                    return; // Exit early since pathfinder callback handles next
-                }
-                break;
-        }
-        
-        // Schedule next activity if still active
-        if (isActive && !isSleeping) {
-            setTimeout(performDayActivity, 10000 + Math.random() * 15000);
-        }
-        
-    } catch (err) {
-        console.log(`Error in day activity: ${err.message}`);
-        if (isActive && !isSleeping) {
-            setTimeout(performDayActivity, 10000);
-        }
-    }
-}
-
-// Utility sleep function
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-// Start the bot
-createBot();
-
-// Keep process alive
-process.on('unhandledRejection', (err) => {
-    console.error('Unhandled rejection:', err);
-});
-
-process.on('SIGINT', () => {
-    console.log('Shutting down...');
-    cleanup();
-    if (bot) {
-        bot.end();
-    }
-    process.exit();
-});
-
-console.log('========================================');
-console.log('CraftMan Bot for Minecraft 1.21.10');
-console.log('Deployed on Render');
-console.log('Server: gameplannet.aternos.me:43658');
-console.log('========================================');
-console.log('\nBot will automatically:');
-console.log('1. Reconnect on server restart');
-console.log('2. Sleep at night at home location');
-console.log('3. Maintain exactly one bed at home');
-console.log('4. Do activities during the day');
-console.log('5. Run 24/7');
-console.log('\nUse "sethome craftman" in chat to set home');
-console.log('Make sure to OP the bot with "/op CraftMan"');
-console.log('========================================');
+        // Check time
+        cons
